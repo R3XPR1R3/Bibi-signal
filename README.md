@@ -49,6 +49,30 @@ data,         virtual $     real $ (via Telegram signals)
 no risk       no risk       your risk
 ```
 
+### 0. Optimize — find robust parameters before backtesting (optional)
+
+Grid-searches strategy parameters across years of historical data with a
+**train/test split** to detect overfitting. Train (default 70%) is used
+to find candidate combos in parallel across CPU cores; the top 30 are
+then evaluated on the held-out test set (default 30%).
+
+```bash
+bibi-signal --mode optimize --ticker QQQ --years 5 --top 10
+bibi-signal --mode optimize --ticker XLE --years 5 --workers 4
+```
+
+Output is a table sorted by test-set score. Pick a row where:
+- TEST return is positive,
+- TEST drawdown isn't worse than you can stomach,
+- the ⚠️ overfit flag is **not** set (train ≫ test = the combo got lucky on
+  history but probably won't generalize).
+
+Then copy those values into `config.yaml` and re-run `--mode backtest`
+to verify. **Optimize is not "AI prediction"** — it's a deterministic search
+over parameter space, with overfitting protection. Markets in the future
+won't be the same as the past, so consider the result a starting point,
+not a guarantee.
+
 ### 1. Backtest — historical replay (one-shot, no setup)
 
 Replays the strategy on years of past QQQ/XLE bars. Tells you if the

@@ -60,6 +60,29 @@ def _run_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_optimize(args: argparse.Namespace) -> int:
+    from .config import StrategyConfig
+    from .optimize import optimize_ticker
+
+    strategy = StrategyConfig.from_yaml(args.config)
+    if args.ticker not in strategy.tickers:
+        print(f"error: {args.ticker} not in config.yaml tickers: {list(strategy.tickers)}",
+              file=sys.stderr)
+        return 2
+    starting = args.starting_cash if args.starting_cash else strategy.starting_cash
+    report = optimize_ticker(
+        args.ticker,
+        strategy.tickers[args.ticker],
+        starting,
+        period=f"{args.years}y",
+        workers=args.workers,
+        top_k=max(args.top, 30),
+        train_frac=args.train_frac,
+    )
+    print(report.render(top=args.top))
+    return 0
+
+
 def _run_paper(args: argparse.Namespace) -> int:
     settings, strategy = load_all()
     _configure_logging(settings.log_level)
@@ -121,7 +144,7 @@ def run() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=("backtest", "paper", "live"),
+        choices=("backtest", "optimize", "paper", "live"),
         default="live",
         help="execution mode (default: live)",
     )
@@ -131,7 +154,15 @@ def run() -> None:
     parser.add_argument("--ticker", help="[backtest] ticker symbol")
     parser.add_argument("--years", type=int, default=5, help="[backtest] history window in years")
     parser.add_argument("--starting-cash", type=float, default=None,
-                        help="[backtest] override starting capital")
+                        help="[backtest/optimize] override starting capital")
+
+    # optimize-only
+    parser.add_argument("--workers", type=int, default=None,
+                        help="[optimize] parallel worker count (default: cpu_count-1)")
+    parser.add_argument("--top", type=int, default=10,
+                        help="[optimize] how many top combos to print (default: 10)")
+    parser.add_argument("--train-frac", type=float, default=0.7,
+                        help="[optimize] fraction of history used for training (default: 0.7)")
 
     # paper-only
     parser.add_argument("--once", action="store_true",
@@ -145,6 +176,10 @@ def run() -> None:
         if not args.ticker:
             parser.error("--mode backtest requires --ticker")
         sys.exit(_run_backtest(args))
+    elif args.mode == "optimize":
+        if not args.ticker:
+            parser.error("--mode optimize requires --ticker")
+        sys.exit(_run_optimize(args))
     elif args.mode == "paper":
         sys.exit(_run_paper(args))
     elif args.mode == "live":

@@ -121,6 +121,16 @@ def run_backtest(
     interval: str = "1d",
 ) -> BTResult:
     df = get_history(ticker, period=period, interval=interval, use_cache=False)
+    return run_backtest_on_df(ticker, cfg, starting_cash, df)
+
+
+def run_backtest_on_df(
+    ticker: str,
+    cfg: TickerConfig,
+    starting_cash: float,
+    df: pd.DataFrame,
+) -> BTResult:
+    """Same as run_backtest but takes pre-fetched OHLCV. Used by the optimizer."""
     df = df.dropna(subset=["Close"]).copy()
 
     df["sma_long"] = sma(df["Close"], cfg.sma_long_period)
