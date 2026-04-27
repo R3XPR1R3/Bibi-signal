@@ -57,3 +57,81 @@ reinvest:
 notifications:
   telegram: true
   console: true
+
+# Internal paper-trading shadow portfolio.
+# Every LIVE signal is also "executed" virtually at the live price in PAPER.
+# Compare /paper vs /status to see how much your manual execution costs you.
+paper:
+  enabled: true
+  starting_cash: 1000.0       # virtual capital — pick something realistic to project
+  mirror_to_paper: true
+
+# Dividend-focused income module. Pulls ex-dividend dates, yield, suggests
+# "buy before ex-date" when price is in a dip vs. recent average.
+dividends:
+  enabled: true
+  check_hour_utc: 14          # daily check, ~market open ET
+  tickers:
+    SCHD:
+      enabled: true
+      buy_window_days: 5
+      dip_threshold: 0.01     # at least 1% below 20-day avg to trigger
+      min_trade_usd: 5.0
+      max_trade_usd: 50.0
+    JEPI:
+      enabled: true
+      buy_window_days: 5
+      dip_threshold: 0.005    # JEPI is less volatile, smaller dips matter
+      min_trade_usd: 5.0
+      max_trade_usd: 50.0
+    JEPQ:
+      enabled: true
+      buy_window_days: 5
+      dip_threshold: 0.01
+      min_trade_usd: 5.0
+      max_trade_usd: 50.0
+
+# Robinhood Crypto — the ONLY part that can be fully automated, because
+# Robinhood Crypto has an official trading API. Set robinhood_crypto_api_key
+# + robinhood_crypto_private_key_b64 in .env to enable.
+crypto:
+  enabled: false              # turn on once API keys are configured
+  auto_execute: false         # start as signal-only; flip to true after testing
+  check_frequency_minutes: 15
+  tickers:
+    BTC-USD:
+      enabled: true
+      dip_percent: 0.04       # crypto is more volatile -> wider rungs
+      profit_percent: 0.06
+      stop_loss_percent: 0.20
+      min_trade_usd: 5.0
+      max_trade_usd: 25.0
+      max_open_lots: 5
+      require_uptrend: false  # crypto trends are messier; trend filter often hurts
+      require_rsi_oversold: true
+      rsi_threshold: 35
+      sma_long_period: 100
+    ETH-USD:
+      enabled: true
+      dip_percent: 0.05
+      profit_percent: 0.07
+      stop_loss_percent: 0.22
+      min_trade_usd: 5.0
+      max_trade_usd: 25.0
+      max_open_lots: 5
+      require_uptrend: false
+      require_rsi_oversold: true
+      rsi_threshold: 35
+      sma_long_period: 100
+    SOL-USD:
+      enabled: false
+      dip_percent: 0.06
+      profit_percent: 0.09
+      stop_loss_percent: 0.25
+      min_trade_usd: 5.0
+      max_trade_usd: 20.0
+      max_open_lots: 4
+      require_uptrend: false
+      require_rsi_oversold: true
+      rsi_threshold: 35
+      sma_long_period: 100

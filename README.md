@@ -43,16 +43,37 @@ bibi-signal
 
 ## Telegram commands
 
+**Trading (manual records of Robinhood fills)**
+
 | Command | Args | What it does |
 |---|---|---|
 | `/buy` | `<ticker> <usd> <price>` | Record a buy you just made in Robinhood |
 | `/sell` | `<ticker> <lot_id> <price>` | Record a sell of a specific lot |
 | `/cash` | `<usd>` | Set free cash balance |
-| `/status` | — | Portfolio, open lots, free cash, unrealised P&L |
-| `/rules` | `[ticker]` | Show current strategy parameters |
-| `/set` | `<ticker> <param> <value>` | Tune a parameter (dip/profit/stop) |
+| `/status` | — | Portfolio, open lots, free cash |
 | `/history` | `[n]` | Last n closed trades + ROI |
-| `/help` | — | List commands |
+
+**Income**
+
+| Command | Args | What it does |
+|---|---|---|
+| `/dividends` | — | Yields & upcoming ex-dates for SCHD/JEPI/JEPQ |
+| `/divreceived` | `<ticker> <usd> [date]` | Record a dividend you got (adds to cash) |
+
+**Strategy**
+
+| Command | Args | What it does |
+|---|---|---|
+| `/rules` | `[ticker]` | Show current strategy parameters |
+| `/set` | `<ticker> <param> <value>` | Tune a parameter in-memory |
+
+**Simulation & crypto**
+
+| Command | Args | What it does |
+|---|---|---|
+| `/paper` | — | Shadow paper portfolio (compare vs LIVE) |
+| `/crypto` | — | Crypto holdings & quotes via Robinhood Crypto API |
+| `/help` | — | List all commands |
 
 ## A note on $100 capital
 
@@ -73,24 +94,58 @@ libraries (`robin-stocks`) exist but violate the ToS and can get your
 account locked. This bot stays on the safe side: it tells you what to do,
 you tap the buttons in the app.
 
-A future module (`alpaca_paper.py`) will mirror every signal into an
-Alpaca paper-trading account so you can verify the strategy on a live
-broker API without risking capital.
+## Internal paper-trading
+
+Every LIVE stock signal is *also* executed virtually in PAPER state inside
+the same SQLite DB at the live price. After a few weeks compare:
+
+- `/paper` — what the strategy alone would have earned (no human delay)
+- `/status` + `/history` — what you actually earned (with your timing)
+
+Big gap = your manual execution is hurting returns. PAPER negative = the
+strategy itself is bad, fix it before scaling. No external broker needed
+for this — pure internal simulation on yfinance prices.
+
+## Robinhood Crypto (the only fully-automatable part)
+
+Robinhood **does** publish an official Crypto Trading API
+(https://docs.robinhood.com/crypto/trading/). It uses Ed25519 request
+signing and supports market orders on BTC, ETH, SOL, etc. This bot ships
+with a client (`robinhood_crypto.py`) and a strategy wrapper
+(`crypto_engine.py`).
+
+Setup:
+
+1. In the Robinhood mobile app: *Account → Investing → Crypto Trading API*
+2. Generate an API key. Robinhood shows you the API key string; you keep
+   the corresponding Ed25519 private key (32-byte seed).
+3. Put the api key in `ROBINHOOD_CRYPTO_API_KEY` and the base64-encoded
+   seed in `ROBINHOOD_CRYPTO_PRIVATE_KEY_B64` in your `.env`.
+4. In `config.yaml`, flip `crypto.enabled: true`. Start with
+   `crypto.auto_execute: false` (signal-only). After a few weeks of clean
+   signals, flip `auto_execute: true` for full automation.
+
+`alpaca_paper.py` is kept as a stub for users who'd rather verify strategy
+on Alpaca's separate paper environment, but is not required.
 
 ## Architecture
 
 ```
 src/bibi_signal/
-├── config.py          # Pydantic settings + YAML loader
-├── database.py        # SQLAlchemy models, session factory, CRUD helpers
-├── price_fetcher.py   # yfinance wrapper with retry/cache
-├── indicators.py      # SMA, RSI, ATR
-├── strategy.py        # ladder logic — pure function, fully testable
-├── backtest.py        # vectorised backtest over historical data
-├── telegram_bot.py    # PTB v21 application + command handlers
-├── scheduler.py       # APScheduler async, polls + dispatches signals
-├── alpaca_paper.py    # stub for future paper-trading mirror
-└── main.py            # entry point
+├── config.py            # Pydantic settings + YAML loader
+├── database.py          # SQLAlchemy models, session factory, CRUD helpers
+├── price_fetcher.py     # yfinance wrapper with retry/cache
+├── indicators.py        # SMA, RSI, ATR
+├── strategy.py          # ladder logic — pure function, fully testable
+├── backtest.py          # vectorised backtest over historical data
+├── paper_engine.py      # internal shadow simulation (PAPER environment)
+├── dividend.py          # ex-date tracking + buy-the-dip-pre-divvy signals
+├── robinhood_crypto.py  # official Robinhood Crypto API client (Ed25519)
+├── crypto_engine.py     # crypto strategy wrapper, optional auto-execute
+├── alpaca_paper.py      # alternative paper broker (optional, stub)
+├── telegram_bot.py      # PTB v21 application + all command handlers
+├── scheduler.py         # APScheduler: stocks tick + crypto tick + daily div
+└── main.py              # entry point
 ```
 
 ## Risks

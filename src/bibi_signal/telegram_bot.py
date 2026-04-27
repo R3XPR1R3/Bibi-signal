@@ -60,15 +60,22 @@ def _strategy(context: ContextTypes.DEFAULT_TYPE) -> StrategyConfig:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "*Bibi-Signal — Ladder Swing Bot*\n\n"
-        "Signal-only. I tell you what to do; you tap in Robinhood.\n\n"
-        "*Commands*\n"
+        "Signal-only for stocks. Auto for crypto (if enabled).\n\n"
+        "*Trading*\n"
         "`/buy <ticker> <usd> <price>` — record a buy\n"
         "`/sell <ticker> <lot_id> <price>` — record a sell of a specific lot\n"
         "`/cash <usd>` — set free cash balance\n"
         "`/status` — portfolio + open lots\n"
+        "`/history [n]` — last n closed trades\n\n"
+        "*Income*\n"
+        "`/dividends` — yields & upcoming ex-dates for SCHD/JEPI/JEPQ\n"
+        "`/divreceived <ticker> <usd> [date]` — record a dividend you got\n\n"
+        "*Strategy*\n"
         "`/rules [ticker]` — show strategy parameters\n"
-        "`/set <ticker> <param> <value>` — tune a parameter (in-memory only)\n"
-        "`/history [n]` — last n closed trades\n"
+        "`/set <ticker> <param> <value>` — tune a parameter (in-memory only)\n\n"
+        "*Simulation & crypto*\n"
+        "`/paper` — shadow paper portfolio (compare vs LIVE)\n"
+        "`/crypto` — crypto holdings & quotes (Robinhood Crypto API)\n\n"
         "`/help` — this message\n"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
@@ -308,6 +315,156 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("\n".join(lines))
 
 
+# ---------- /paper ----------
+
+@_auth
+async def cmd_paper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from . import paper_engine
+    from .price_fetcher import get_price, PriceUnavailable
+
+    strategy = _strategy(context)
+    with _session(context) as session:
+        opens = db.open_lots(session, Environment.PAPER)
+        prices: dict[str, float] = {}
+        for lot in opens:
+            try:
+                prices[lot.ticker] = get_price(lot.ticker).price
+            except PriceUnavailable:
+                pass
+        s = paper_engine.paper_summary(session, prices)
+
+    live_cash = float(0)
+    with _session(context) as session:
+        live_cash = float(db.get_cash(session, LIVE))
+
+    text = (
+        "*📊 Paper portfolio* (shadow simulation)\n"
+        f"Cash:           ${s['cash']:.2f}\n"
+        f"Open lots:      {s['open_lots']}\n"
+        f"Open value:     ${s['open_value']:.2f}\n"
+        f"Total equity:   ${s['total_equity']:.2f}\n"
+        f"Realised P&L:   ${s['realised_pnl']:+.2f}\n"
+        f"Unrealised P&L: ${s['unrealised_pnl']:+.2f}\n"
+        f"Closed trades:  {s['closed_trades']}  win-rate {s['win_rate']*100:.1f}%\n\n"
+        f"_LIVE cash for comparison: ${live_cash:.2f}_"
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+# ---------- /dividends ----------
+
+@_auth
+async def cmd_dividends(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from .dividend import fetch_dividend_info, total_dividends_received
+    from .price_fetcher import get_price, PriceUnavailable
+
+    strategy = _strategy(context)
+    if not strategy.dividends.enabled or not strategy.dividends.tickers:
+        await update.message.reply_text("Dividend tracker is disabled.")
+        return
+
+    blocks: list[str] = []
+    for sym in strategy.dividends.tickers:
+        try:
+            price = get_price(sym).price
+        except PriceUnavailable:
+            blocks.append(f"*{sym}* — price unavailable")
+            continue
+        info = fetch_dividend_info(sym, price)
+        if info is None:
+            blocks.append(f"*{sym}* — no dividend history")
+            continue
+        ex_str = (
+            f"ex-date {info.next_ex_date.isoformat()} (in {info.next_ex_in_days}d)"
+            if info.next_ex_date else "no upcoming ex-date"
+        )
+        blocks.append(
+            f"*{sym}*  ${price:.2f}\n"
+            f"  Last div ${info.last_div_amount:.4f} on {info.last_div_date}\n"
+            f"  TTM ${info.ttm_total:.4f}  yield {info.annual_yield_pct:.2f}%\n"
+            f"  {ex_str}"
+        )
+
+    with _session(context) as session:
+        total = total_dividends_received(session, Environment.LIVE)
+    blocks.append(f"\n*Total dividends received (LIVE):* ${float(total):.2f}")
+
+    await update.message.reply_text("\n\n".join(blocks), parse_mode=ParseMode.MARKDOWN)
+
+
+# ---------- /divreceived ----------
+
+@_auth
+async def cmd_divreceived(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User reports a dividend they actually got from Robinhood."""
+    from datetime import date as _date
+    from .dividend import record_received_dividend
+
+    if len(context.args) not in (2, 3):
+        await update.message.reply_text("Usage: /divreceived <ticker> <usd> [YYYY-MM-DD]")
+        return
+    try:
+        ticker = context.args[0].upper()
+        amount = Decimal(context.args[1])
+        pay_date = _date.fromisoformat(context.args[2]) if len(context.args) == 3 else _date.today()
+    except (InvalidOperation, ValueError) as e:
+        await update.message.reply_text(f"Bad input: {e}")
+        return
+
+    with _session(context) as session:
+        record_received_dividend(session, ticker, amount, pay_date)
+        session.commit()
+        new_cash = db.get_cash(session, LIVE)
+
+    await update.message.reply_text(
+        f"💰 Dividend recorded: ${amount:.2f} from {ticker} on {pay_date}.\n"
+        f"Cash now ${float(new_cash):.2f}."
+    )
+
+
+# ---------- /crypto ----------
+
+@_auth
+async def cmd_crypto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from .robinhood_crypto import RobinhoodCryptoClient, RobinhoodCryptoError, RobinhoodCryptoNotConfigured
+
+    settings: AppSettings = context.application.bot_data["settings"]
+    strategy = _strategy(context)
+    if not strategy.crypto.enabled:
+        await update.message.reply_text("Crypto module is disabled in config.yaml.")
+        return
+
+    try:
+        client = RobinhoodCryptoClient(settings)
+    except RobinhoodCryptoNotConfigured:
+        await update.message.reply_text(
+            "Robinhood Crypto API keys are not set. See .env.example."
+        )
+        return
+
+    lines = [f"*Crypto* (auto-execute: {'ON' if strategy.crypto.auto_execute else 'OFF'})"]
+    try:
+        bp = client.buying_power_usd()
+        lines.append(f"Buying power: ${bp:.2f}")
+        for sym in strategy.crypto.tickers:
+            if not strategy.crypto.tickers[sym].enabled:
+                continue
+            try:
+                q = client.best_bid_ask(sym)
+                lines.append(f"{sym}: bid ${q.bid:.2f}  ask ${q.ask:.2f}")
+            except RobinhoodCryptoError as e:
+                lines.append(f"{sym}: quote error — {e}")
+        holdings = client.get_holdings()
+        if holdings:
+            lines.append("\n*Holdings:*")
+            for h in holdings:
+                lines.append(f"  {h.symbol}  qty {h.quantity:.6f}")
+    finally:
+        client.close()
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
 # ---------- application factory ----------
 
 def build_application(
@@ -330,6 +487,10 @@ def build_application(
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("set", cmd_set))
     app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("paper", cmd_paper))
+    app.add_handler(CommandHandler("dividends", cmd_dividends))
+    app.add_handler(CommandHandler("divreceived", cmd_divreceived))
+    app.add_handler(CommandHandler("crypto", cmd_crypto))
     return app
 
 

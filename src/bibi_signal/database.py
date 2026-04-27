@@ -122,6 +122,17 @@ class Signal(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class DividendEvent(Base):
+    __tablename__ = "dividend_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    environment: Mapped[Environment] = mapped_column(SAEnum(Environment), nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    amount_usd: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    pay_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 def make_engine(database_url: str):
     return create_engine(database_url, echo=False, future=True)
 

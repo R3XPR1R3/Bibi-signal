@@ -8,6 +8,7 @@ from decimal import Decimal
 import structlog
 
 from . import database as db
+from . import paper_engine
 from .config import load_all
 from .database import Environment, init_db
 from .scheduler import start as start_scheduler
@@ -44,9 +45,15 @@ def run() -> None:
             db.set_cash(session, Environment.LIVE, Decimal(str(strategy.starting_cash)))
             session.commit()
             log.info("cash_seeded", amount=strategy.starting_cash)
+        if strategy.paper.enabled:
+            paper_engine.ensure_paper_seeded(
+                session, Decimal(str(strategy.paper.starting_cash))
+            )
+            session.commit()
+            log.info("paper_seeded_if_empty", amount=strategy.paper.starting_cash)
 
     app = build_application(settings, strategy, session_factory)
-    scheduler = start_scheduler(strategy, session_factory, app)
+    scheduler = start_scheduler(strategy, settings, session_factory, app)
     app.bot_data["scheduler"] = scheduler
 
     log.info("bot_running", tickers=list(strategy.tickers))
