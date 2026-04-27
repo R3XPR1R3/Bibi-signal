@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets & local data
+.env
+.env.local
+*.db
+*.sqlite
+*.sqlite3
+data/*
+!data/.gitkeep
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backtest outputs
+backtest_results/
+*.csv
+!tests/fixtures/*.csv

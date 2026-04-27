@@ -1,0 +1,59 @@
+# Ladder Swing Bot — strategy configuration
+# All percentages are decimal fractions (0.02 = 2%).
+
+# Total starting capital. Bot tracks free cash separately in DB.
+starting_cash: 100.0
+
+# How often to poll prices and evaluate signals (minutes).
+# 5–15 min recommended for swing strategy. Shorter = more noise + API limits.
+check_frequency_minutes: 10
+
+# Trading hours filter (US/Eastern). Bot only signals when market is open.
+respect_market_hours: true
+
+# Per-asset configuration.
+tickers:
+  QQQ:
+    enabled: true
+    dip_percent: 0.02         # buy when price drops this much from last buy
+    profit_percent: 0.04      # sell when this lot gains this much
+    stop_loss_percent: 0.15   # close lot at this loss to avoid bleed-out
+    min_trade_usd: 5.0        # minimum size of a single buy (Robinhood fractional minimum is $1)
+    max_trade_usd: 20.0       # maximum size of a single buy
+    max_open_lots: 5          # ladder cap; refuse new buys when full
+    use_atr_sizing: false     # if true, dip_percent is overridden by k * ATR / price
+    atr_k: 1.5                # multiplier when use_atr_sizing=true
+    require_rsi_oversold: true
+    rsi_threshold: 35
+    require_uptrend: true     # skip buys when price < 200-day SMA
+    sma_long_period: 200
+
+  XLE:
+    enabled: true
+    dip_percent: 0.025
+    profit_percent: 0.05
+    stop_loss_percent: 0.15
+    min_trade_usd: 5.0
+    max_trade_usd: 20.0
+    max_open_lots: 5
+    use_atr_sizing: false
+    atr_k: 1.5
+    require_rsi_oversold: true
+    rsi_threshold: 35
+    require_uptrend: true
+    sma_long_period: 200
+
+# How profit is reinvested.
+# all_to_pool — 100% of sale proceeds back to cash pool (default).
+# split — split realized profit between trading pool and dividend bucket.
+reinvest:
+  mode: all_to_pool
+  # Used only when mode=split:
+  trading_share: 0.80
+  dividend_share: 0.20
+  dividend_ticker: SCHD
+
+# Notification channels. Telegram is primary.
+notifications:
+  telegram: true
+  console: true
