@@ -18,28 +18,86 @@ trade manually in the Robinhood app.
 - Backtests the same strategy on historical data so you can see what it
   would have done before risking real money.
 
-## Quick start
+## Install
 
 ```bash
-# 1. Clone and install
 git clone <this-repo>
 cd Bibi-signal
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,backtest]"
+pip install -e ".[dev]"
 
-# 2. Configure
+# Optional: copy .env.example to .env and fill in tokens (only needed for live mode).
 cp .env.example .env
-# Edit .env: add TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_IDS
-
-# Optional: tune config.yaml (per-ticker dip/profit, stop-loss, RSI threshold)
-
-# 3. Backtest before running live
-bibi-backtest --ticker QQQ --years 5
-bibi-backtest --ticker XLE --years 5
-
-# 4. Run the signal bot
-bibi-signal
 ```
+
+Sanity-check the install:
+
+```bash
+pytest                                        # 29 tests, all should pass
+bibi-signal --mode paper --once --no-market-hours   # one tick, prints portfolio
+```
+
+## Three modes
+
+The bot has three modes that map to natural stages of trusting it:
+
+```
+backtest  ──>  paper  ──>  live
+   |             |           |
+historical    live prices   live prices
+data,         virtual $     real $ (via Telegram signals)
+no risk       no risk       your risk
+```
+
+### 1. Backtest — historical replay (one-shot, no setup)
+
+Replays the strategy on years of past QQQ/XLE bars. Tells you if the
+strategy was historically profitable, what the worst drawdown was, and
+how it compares to buy-and-hold.
+
+```bash
+bibi-signal --mode backtest --ticker QQQ --years 5
+bibi-signal --mode backtest --ticker XLE --years 5 --starting-cash 100
+```
+
+### 2. Paper — live prices, virtual money (no Telegram needed)
+
+Runs the strategy on the **current live market** but trades only virtual
+money in the PAPER environment of your DB. Console output, no broker, no
+Telegram token required. This is the recommended next step after backtest:
+let it run for 2–4 weeks and watch what happens.
+
+```bash
+# Continuous, normal cadence (every check_frequency_minutes)
+bibi-signal --mode paper
+
+# One tick and exit — handy for smoke tests
+bibi-signal --mode paper --once
+
+# Test on a weekend (skip the "market closed" guard)
+bibi-signal --mode paper --once --no-market-hours
+```
+
+After each tick the console prints the paper portfolio summary:
+cash, open lots, target/stop prices, realised + unrealised P&L, win rate.
+
+### 3. Live — real signals via Telegram (your real account)
+
+Full bot: stocks scheduler + crypto scheduler + dividend cron, all
+broadcasting to Telegram. Every LIVE signal is also mirrored into PAPER
+so you can compare. Requires `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_ALLOWED_CHAT_IDS` in `.env`.
+
+```bash
+bibi-signal --mode live   # or just `bibi-signal`
+```
+
+## Persistence
+
+Everything is in `data/bibi.db` (SQLite). Stop and restart the bot any
+time — cash, open lots, trade history, fingerprints of already-sent
+signals all survive. The only thing that doesn't persist is in-memory
+`/set` overrides; edit `config.yaml` to make tweaks permanent.
 
 ## Telegram commands
 
