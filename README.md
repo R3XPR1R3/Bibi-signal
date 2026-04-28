@@ -176,6 +176,41 @@ so you can compare. Requires `TELEGRAM_BOT_TOKEN` and
 bibi-signal --mode live   # or just `bibi-signal`
 ```
 
+## Price source: Yahoo (default) or Robinhood (unofficial)
+
+Stock prices come from `yfinance` by default — free, ~30s lag, no auth.
+You can switch to **Robinhood directly** via the `robin-stocks` library:
+real-time prices, the same numbers shown in the Robinhood mobile app.
+
+⚠️  **Risk warning:** Robinhood does not publish a stocks API. `robin-stocks`
+uses internal endpoints that violate their ToS. Aggressive polling can
+get your account locked. We mitigate with a 30-second response cache and
+a hard 30-requests/minute local guard, but the risk is non-zero.
+
+The crypto API is **not** affected — it's official.
+
+Setup:
+
+```bash
+pip install -e '.[robinhood]'      # adds robin-stocks + pyotp
+
+# In .env:
+#   ROBINHOOD_USERNAME=you@example.com
+#   ROBINHOOD_PASSWORD=...
+#   ROBINHOOD_MFA_SECRET=...       # optional, base32 TOTP seed for unattended
+
+bibi-rh-login                      # one-time interactive login; session cached
+                                   # to ~/.tokens/robinhood.pickle
+
+# In config.yaml:
+#   price_source: robinhood
+```
+
+After this every call to `get_price()` flows through Robinhood. If the
+session expires or a request fails, the bot **automatically falls back to
+yfinance** so it doesn't crash; you'll see a warning in the log and can
+re-run `bibi-rh-login` to refresh.
+
 ## Persistence
 
 Everything is in `data/bibi.db` (SQLite). Stop and restart the bot any

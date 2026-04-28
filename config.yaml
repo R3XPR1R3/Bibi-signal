@@ -11,6 +11,13 @@ check_frequency_minutes: 10
 # Trading hours filter (US/Eastern). Bot only signals when market is open.
 respect_market_hours: true
 
+# Where to read live STOCK prices.
+#   yfinance  — default; free, ~30s lag, scrapes Yahoo (occasionally flaky)
+#   robinhood — unofficial via robin-stocks; real-time, ToS gray area
+#               requires `pip install -e '.[robinhood]'` then `bibi-rh-login`
+# Crypto always uses the official Robinhood Crypto API regardless of this.
+price_source: yfinance
+
 # Per-asset configuration.
 tickers:
   QQQ:

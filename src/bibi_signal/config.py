@@ -91,6 +91,10 @@ class StrategyConfig(BaseModel):
     starting_cash: float = Field(gt=0)
     check_frequency_minutes: int = Field(ge=1, le=240)
     respect_market_hours: bool = True
+    # Where to read live STOCK prices. yfinance = default, free, ~30s lag.
+    # robinhood = unofficial via robin-stocks, requires bibi-rh-login first,
+    # ToS gray area but real-time. Crypto always uses Robinhood Crypto API.
+    price_source: Literal["yfinance", "robinhood"] = "yfinance"
     tickers: dict[str, TickerConfig]
     reinvest: ReinvestConfig = ReinvestConfig()
     notifications: NotificationConfig = NotificationConfig()
@@ -123,6 +127,12 @@ class AppSettings(BaseSettings):
     robinhood_crypto_api_key: str = ""
     robinhood_crypto_private_key_b64: str = ""  # base64-encoded Ed25519 private key seed
     robinhood_crypto_base_url: str = "https://trading.robinhood.com"
+
+    # Robinhood STOCKS via robin-stocks (UNOFFICIAL, ToS gray area, use at your own risk).
+    # First-time setup: run `bibi-rh-login` once to cache the session.
+    robinhood_username: str = ""
+    robinhood_password: str = ""
+    robinhood_mfa_secret: str = ""  # base32 TOTP seed for unattended re-auth
 
     @property
     def allowed_chat_ids(self) -> set[int]:

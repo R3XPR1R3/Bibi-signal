@@ -69,20 +69,68 @@ def _fetch_price_raw(ticker: str) -> float:
 
 
 def get_price(ticker: str, *, use_cache: bool = True) -> Quote:
+    """Read current price via the configured price_source (yfinance or robinhood).
+
+    Source is picked from the active StrategyConfig the first time a price is
+    fetched. To force a different source for a single call, use the lower-level
+    fetchers directly.
+    """
+    source = _resolve_source()
+    if source == "robinhood":
+        try:
+            return _get_price_robinhood(ticker, use_cache=use_cache)
+        except Exception as e:
+            log.warning("robinhood_price_failed_falling_back_to_yfinance",
+                        ticker=ticker, error=str(e))
+            # graceful degrade so the bot doesn't crash if RH session expired
+    return _get_price_yfinance(ticker, use_cache=use_cache)
+
+
+def _get_price_yfinance(ticker: str, *, use_cache: bool = True) -> Quote:
     now = time.time()
     if use_cache and ticker in _price_cache:
         price, fetched_at = _price_cache[ticker]
         if now - fetched_at < _PRICE_TTL_SECONDS:
             return Quote(ticker, price, datetime.fromtimestamp(fetched_at, tz=timezone.utc))
-
     try:
         price = _fetch_price_raw(ticker)
     except Exception as e:
-        log.error("price_fetch_failed", ticker=ticker, error=str(e))
+        log.error("yfinance_price_fetch_failed", ticker=ticker, error=str(e))
         raise PriceUnavailable(f"failed to fetch {ticker}: {e}") from e
-
     _price_cache[ticker] = (price, now)
     return Quote(ticker, price, datetime.fromtimestamp(now, tz=timezone.utc))
+
+
+# ---------- Robinhood source (lazy-loaded) ----------
+
+_rh_source = None  # singleton RobinhoodPriceSource
+_active_source: str | None = None  # set by set_price_source()
+
+
+def set_price_source(source: str) -> None:
+    """Called once at startup from main.py based on StrategyConfig.price_source."""
+    global _active_source
+    _active_source = source
+
+
+def _resolve_source() -> str:
+    return _active_source or "yfinance"
+
+
+def _get_robinhood_source():
+    global _rh_source
+    if _rh_source is None:
+        from .robinhood_stocks import RobinhoodPriceSource  # lazy import
+        _rh_source = RobinhoodPriceSource()
+    return _rh_source
+
+
+def _get_price_robinhood(ticker: str, *, use_cache: bool = True) -> Quote:
+    src = _get_robinhood_source()
+    if not use_cache:
+        src.clear_cache()
+    rq = src.get_price(ticker)
+    return Quote(ticker, rq.price, rq.fetched_at)
 
 
 @retry(

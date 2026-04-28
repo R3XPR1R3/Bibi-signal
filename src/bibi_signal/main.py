@@ -84,8 +84,10 @@ def _run_optimize(args: argparse.Namespace) -> int:
 
 
 def _run_paper(args: argparse.Namespace) -> int:
+    from .price_fetcher import set_price_source
     settings, strategy = load_all()
     _configure_logging(settings.log_level)
+    set_price_source(strategy.price_source)
     session_factory = init_db(settings.database_url)
     asyncio.run(
         paper_runner.run(
@@ -99,11 +101,13 @@ def _run_paper(args: argparse.Namespace) -> int:
 
 
 def _run_live(args: argparse.Namespace) -> int:
+    from .price_fetcher import set_price_source
     from .scheduler import start as start_scheduler
     from .telegram_bot import build_application
 
     settings, strategy = load_all()
     _configure_logging(settings.log_level)
+    set_price_source(strategy.price_source)
     log = structlog.get_logger("main")
 
     session_factory = init_db(settings.database_url)
