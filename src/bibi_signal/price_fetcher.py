@@ -69,20 +69,26 @@ def _fetch_price_raw(ticker: str) -> float:
 
 
 def get_price(ticker: str, *, use_cache: bool = True) -> Quote:
-    """Read current price via the configured price_source (yfinance or robinhood).
+    """Read current price via the configured price_source.
 
-    Source is picked from the active StrategyConfig the first time a price is
-    fetched. To force a different source for a single call, use the lower-level
-    fetchers directly.
+    Source priority: alpaca > robinhood > yfinance fallback. If the
+    configured source fails (e.g., expired Alpaca key, lost Robinhood
+    session), we automatically fall back to yfinance so the bot stays
+    alive — a warning is logged.
     """
     source = _resolve_source()
-    if source == "robinhood":
+    if source == "alpaca":
+        try:
+            return _get_price_alpaca(ticker, use_cache=use_cache)
+        except Exception as e:
+            log.warning("alpaca_price_failed_falling_back_to_yfinance",
+                        ticker=ticker, error=str(e))
+    elif source == "robinhood":
         try:
             return _get_price_robinhood(ticker, use_cache=use_cache)
         except Exception as e:
             log.warning("robinhood_price_failed_falling_back_to_yfinance",
                         ticker=ticker, error=str(e))
-            # graceful degrade so the bot doesn't crash if RH session expired
     return _get_price_yfinance(ticker, use_cache=use_cache)
 
 
@@ -131,6 +137,28 @@ def _get_price_robinhood(ticker: str, *, use_cache: bool = True) -> Quote:
         src.clear_cache()
     rq = src.get_price(ticker)
     return Quote(ticker, rq.price, rq.fetched_at)
+
+
+# ---------- Alpaca source (lazy-loaded) ----------
+
+_alpaca_source = None
+
+
+def _get_alpaca_source():
+    global _alpaca_source
+    if _alpaca_source is None:
+        from .alpaca_data import AlpacaPriceSource  # lazy import
+        from .config import AppSettings
+        _alpaca_source = AlpacaPriceSource(AppSettings())
+    return _alpaca_source
+
+
+def _get_price_alpaca(ticker: str, *, use_cache: bool = True) -> Quote:
+    src = _get_alpaca_source()
+    if not use_cache:
+        src.clear_cache()
+    aq = src.get_price(ticker)
+    return Quote(ticker, aq.price, aq.fetched_at)
 
 
 @retry(

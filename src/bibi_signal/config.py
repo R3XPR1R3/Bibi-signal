@@ -91,10 +91,12 @@ class StrategyConfig(BaseModel):
     starting_cash: float = Field(gt=0)
     check_frequency_minutes: int = Field(ge=1, le=240)
     respect_market_hours: bool = True
-    # Where to read live STOCK prices. yfinance = default, free, ~30s lag.
-    # robinhood = unofficial via robin-stocks, requires bibi-rh-login first,
-    # ToS gray area but real-time. Crypto always uses Robinhood Crypto API.
-    price_source: Literal["yfinance", "robinhood"] = "yfinance"
+    # Where to read live STOCK prices.
+    #   yfinance  — free, ~30s lag, unofficial Yahoo scraping (default fallback)
+    #   alpaca    — real-time IEX, free official API ✓ recommended
+    #   robinhood — unofficial via robin-stocks, ToS gray area, account-lock risk
+    # Crypto always uses the official Robinhood Crypto API regardless.
+    price_source: Literal["yfinance", "alpaca", "robinhood"] = "yfinance"
     tickers: dict[str, TickerConfig]
     reinvest: ReinvestConfig = ReinvestConfig()
     notifications: NotificationConfig = NotificationConfig()

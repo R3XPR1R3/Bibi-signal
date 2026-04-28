@@ -176,40 +176,65 @@ so you can compare. Requires `TELEGRAM_BOT_TOKEN` and
 bibi-signal --mode live   # or just `bibi-signal`
 ```
 
-## Price source: Yahoo (default) or Robinhood (unofficial)
+## Price source for stocks (yfinance / alpaca / robinhood)
 
-Stock prices come from `yfinance` by default — free, ~30s lag, no auth.
-You can switch to **Robinhood directly** via the `robin-stocks` library:
-real-time prices, the same numbers shown in the Robinhood mobile app.
+Three options. Crypto always uses the official Robinhood Crypto API.
 
-⚠️  **Risk warning:** Robinhood does not publish a stocks API. `robin-stocks`
-uses internal endpoints that violate their ToS. Aggressive polling can
-get your account locked. We mitigate with a 30-second response cache and
-a hard 30-requests/minute local guard, but the risk is non-zero.
+| Source | Real-time? | Legal? | Cost | Setup |
+|---|---|---|---|---|
+| **yfinance** (default) | ~30s lag | yes | free | nothing |
+| **alpaca** ✓ recommended | yes | yes (official) | free | sign up + 2 keys |
+| **robinhood** | yes | ToS gray area | free | login + risk |
 
-The crypto API is **not** affected — it's official.
-
-Setup:
+If you want real-time prices, **use Alpaca**. Alpaca is the only
+recommended path for production:
 
 ```bash
-pip install -e '.[robinhood]'      # adds robin-stocks + pyotp
+pip install -e '.[alpaca]'
 
-# In .env:
-#   ROBINHOOD_USERNAME=you@example.com
+# 1. https://alpaca.markets/ -> Sign Up (no SSN needed for paper account)
+# 2. Dashboard -> Paper Trading -> Generate API keys
+# 3. Put them in .env:
+#      ALPACA_PAPER_API_KEY=PK...
+#      ALPACA_PAPER_API_SECRET=...
+
+# 4. Switch source — either via TUI:
+bibi-tui                   # → [1] Configure → [s] Switch price source → 2
+
+#    or by hand in config.yaml:
+#      price_source: alpaca
+```
+
+You only need an Alpaca **paper** account — no live trading account
+required. Bibi-Signal does **not** use Alpaca's paper-trading orders;
+our internal `paper_engine.py` simulates trades against whichever data
+source you configure.
+
+### Robinhood as a price source (advanced, not recommended)
+
+If you specifically want the same numbers shown in the Robinhood mobile
+app, you can route prices through `robin-stocks`. **This violates
+Robinhood's ToS** and aggressive polling can lock your account. We
+mitigate with a 30-second response cache and a 30-requests/minute local
+guard, but the risk is non-zero.
+
+```bash
+pip install -e '.[robinhood]'
+# .env:
+#   ROBINHOOD_USERNAME=...
 #   ROBINHOOD_PASSWORD=...
-#   ROBINHOOD_MFA_SECRET=...       # optional, base32 TOTP seed for unattended
-
-bibi-rh-login                      # one-time interactive login; session cached
-                                   # to ~/.tokens/robinhood.pickle
-
-# In config.yaml:
+#   ROBINHOOD_MFA_SECRET=...   # optional, base32 TOTP seed for unattended
+bibi-rh-login                  # one-time login; session cached
+# config.yaml:
 #   price_source: robinhood
 ```
 
-After this every call to `get_price()` flows through Robinhood. If the
-session expires or a request fails, the bot **automatically falls back to
-yfinance** so it doesn't crash; you'll see a warning in the log and can
-re-run `bibi-rh-login` to refresh.
+### Auto-fallback
+
+Whichever source you pick, if it fails (Alpaca rate limit, expired
+Robinhood session, network), the bot **automatically falls back to
+yfinance** so it doesn't crash. A warning is logged and the next tick
+will retry the configured source.
 
 ## Persistence
 

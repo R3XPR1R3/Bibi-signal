@@ -12,9 +12,11 @@ check_frequency_minutes: 10
 respect_market_hours: true
 
 # Where to read live STOCK prices.
-#   yfinance  — default; free, ~30s lag, scrapes Yahoo (occasionally flaky)
+#   yfinance  — default fallback; free, ~30s lag, scrapes Yahoo
+#   alpaca    — real-time IEX, free official API ✓ recommended
+#               needs `pip install -e '.[alpaca]'` and ALPACA_PAPER_API_KEY/SECRET in .env
 #   robinhood — unofficial via robin-stocks; real-time, ToS gray area
-#               requires `pip install -e '.[robinhood]'` then `bibi-rh-login`
+#               needs `pip install -e '.[robinhood]'` then `bibi-rh-login`
 # Crypto always uses the official Robinhood Crypto API regardless of this.
 price_source: yfinance
 
