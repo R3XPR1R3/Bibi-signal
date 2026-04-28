@@ -23,8 +23,10 @@ import argparse
 import itertools
 import math
 import multiprocessing as mp
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
@@ -259,7 +261,144 @@ def optimize_ticker(
     )
 
 
+# ---------- apply best combo to config.yaml ----------
+
+_PARAMS_TO_APPLY: tuple[str, ...] = (
+    "dip_percent",
+    "profit_percent",
+    "stop_loss_percent",
+    "require_rsi_oversold",
+    "rsi_threshold",
+    "require_uptrend",
+    "trailing_take_profit",
+    "trail_percent",
+)
+
+
+def _format_yaml_value(v) -> str:
+    """Render a Python value the way YAML expects."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float):
+        # Avoid scientific notation; trim trailing zeros without losing precision.
+        s = f"{v:.6f}".rstrip("0").rstrip(".")
+        return s if s else "0"
+    return str(v)
+
+
+def apply_combo_to_yaml(yaml_path: Path, ticker: str, combo: Combo) -> list[str]:
+    """Rewrite the ticker's strategy params in config.yaml.
+
+    Preserves comments and unrelated keys. Backs up the original text in
+    memory; if the result fails to parse as a valid StrategyConfig, the
+    original is restored and a RuntimeError is raised.
+
+    Returns a list of human-readable change descriptions ("dip_percent: 0.02 → 0.03").
+    """
+    backup = yaml_path.read_text()
+    lines = backup.splitlines()
+    updates: dict[str, object] = {p: getattr(combo, p) for p in _PARAMS_TO_APPLY}
+
+    in_block = False
+    block_indent = -1
+    changes: list[str] = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Detect ticker header — e.g. "  QQQ:" with no further content.
+        if stripped == f"{ticker}:":
+            in_block = True
+            block_indent = len(line) - len(line.lstrip())
+            continue
+        if not in_block:
+            continue
+        if not stripped:
+            continue  # blank line, stay in block
+        line_indent = len(line) - len(line.lstrip())
+        if line_indent <= block_indent:
+            in_block = False
+            continue
+        # Inside the ticker's block.
+        if ":" not in stripped:
+            continue
+        param = stripped.split(":", 1)[0].strip()
+        if param not in updates:
+            continue
+        new_val = updates[param]
+        formatted = _format_yaml_value(new_val)
+        old_value = stripped.split(":", 1)[1].split("#")[0].strip()
+        # Compare YAML values, not raw lines, so whitespace before a
+        # comment doesn't get mistaken for a real change.
+        if old_value == formatted:
+            continue
+        # Preserve trailing comment exactly.
+        colon_idx = line.find(":")
+        comment_idx = line.find("#", colon_idx)
+        comment_suffix = ""
+        if comment_idx != -1:
+            comment_suffix = "  " + line[comment_idx:].rstrip()
+        lines[i] = f"{' ' * line_indent}{param}: {formatted}{comment_suffix}"
+        changes.append(f"{param}: {old_value} → {formatted}")
+
+    yaml_path.write_text("\n".join(lines) + "\n")
+
+    # Validate the result; restore the backup if anything is wrong.
+    try:
+        from .config import StrategyConfig
+        StrategyConfig.from_yaml(yaml_path)
+    except Exception as e:
+        yaml_path.write_text(backup)
+        raise RuntimeError(f"YAML invalid after apply, restored original: {e}") from e
+
+    return changes
+
+
 # ---------- CLI hook ----------
+
+def maybe_apply(
+    report: OptimizeReport,
+    yaml_path: Path,
+    apply_rank: int | None,
+    interactive: bool,
+) -> None:
+    """If --apply was given, or stdin is a TTY and the user picks one,
+    write the chosen combo into config.yaml and print a diff."""
+    rank = apply_rank
+    if rank is None and interactive and report.rows:
+        try:
+            raw = input(
+                "\nApply which rank to config.yaml? "
+                "(rank number, or empty to skip): "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not raw:
+            return
+        try:
+            rank = int(raw)
+        except ValueError:
+            print(f"  not a number: {raw!r} — skipping")
+            return
+    if rank is None:
+        return
+    if not 1 <= rank <= len(report.rows):
+        print(f"  rank {rank} out of range (1..{len(report.rows)})")
+        return
+    combo: Combo = report.rows[rank - 1]["combo"]
+    try:
+        changes = apply_combo_to_yaml(yaml_path, report.ticker, combo)
+    except RuntimeError as e:
+        print(f"  ✗ apply failed: {e}")
+        return
+    if not changes:
+        print(f"\n  {yaml_path} already matches rank #{rank} — nothing to change")
+        return
+    print(f"\n  ✓ Applied rank #{rank} to {yaml_path} for {report.ticker}:")
+    for c in changes:
+        print(f"    {c}")
+    print("  Run `bibi-signal --mode backtest` to verify the new params.")
+
 
 def cli() -> None:
     parser = argparse.ArgumentParser(description="Grid-search strategy parameters with train/test split.")
@@ -270,6 +409,13 @@ def cli() -> None:
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--top", type=int, default=10)
     parser.add_argument("--train-frac", type=float, default=0.7)
+    parser.add_argument(
+        "--apply",
+        type=int,
+        default=None,
+        help="apply rank N (1-based) to config.yaml automatically; "
+             "if omitted and stdin is a TTY, you'll be prompted",
+    )
     args = parser.parse_args()
 
     sc = StrategyConfig.from_yaml(args.config)
@@ -287,6 +433,7 @@ def cli() -> None:
         train_frac=args.train_frac,
     )
     print(report.render(top=args.top))
+    maybe_apply(report, Path(args.config), args.apply, interactive=sys.stdin.isatty())
 
 
 if __name__ == "__main__":

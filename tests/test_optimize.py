@@ -166,3 +166,152 @@ def test_split_train_test_drops_nan_close():
     train, test = _split_train_test(df, train_frac=0.5)
     # 9 rows after dropping NaN, split 50/50 -> 4 train, 5 test (cut = 4)
     assert len(train) + len(test) == 9
+
+
+# ---------- apply_combo_to_yaml ----------
+
+from bibi_signal.optimize import apply_combo_to_yaml
+from pathlib import Path
+
+
+def _yaml_fixture(tmp_path: Path) -> Path:
+    p = tmp_path / "config.yaml"
+    p.write_text("""\
+starting_cash: 100.0
+check_frequency_minutes: 10
+respect_market_hours: true
+price_source: yfinance
+tickers:
+  QQQ:
+    enabled: true
+    dip_percent: 0.02         # buy on this dip
+    profit_percent: 0.04
+    stop_loss_percent: 0.15
+    min_trade_usd: 5.0
+    max_trade_usd: 20.0
+    max_open_lots: 5
+    use_atr_sizing: false
+    atr_k: 1.5
+    require_rsi_oversold: true
+    rsi_threshold: 35
+    require_uptrend: true
+    sma_long_period: 200
+    trailing_take_profit: false
+    trail_percent: 0.02
+  XLE:
+    enabled: true
+    dip_percent: 0.025
+    profit_percent: 0.05
+    stop_loss_percent: 0.15
+    min_trade_usd: 5.0
+    max_trade_usd: 20.0
+    max_open_lots: 5
+    use_atr_sizing: false
+    atr_k: 1.5
+    require_rsi_oversold: true
+    rsi_threshold: 35
+    require_uptrend: true
+    sma_long_period: 200
+    trailing_take_profit: false
+    trail_percent: 0.025
+""")
+    return p
+
+
+def _winner_combo() -> Combo:
+    return Combo(
+        dip_percent=0.05,
+        profit_percent=0.08,
+        stop_loss_percent=0.10,
+        require_rsi_oversold=False,
+        rsi_threshold=35,
+        require_uptrend=False,
+        trailing_take_profit=True,
+        trail_percent=0.05,
+    )
+
+
+def test_apply_changes_only_target_ticker(tmp_path):
+    p = _yaml_fixture(tmp_path)
+    changes = apply_combo_to_yaml(p, "QQQ", _winner_combo())
+    text = p.read_text()
+    # QQQ is updated
+    assert "dip_percent: 0.05" in text
+    assert "profit_percent: 0.08" in text
+    assert "trailing_take_profit: true" in text
+    assert "trail_percent: 0.05" in text
+    assert "require_uptrend: false" in text
+    assert "require_rsi_oversold: false" in text
+    # XLE is NOT touched
+    assert "dip_percent: 0.025" in text
+    assert "profit_percent: 0.05\n    stop_loss_percent" in text  # the XLE block
+    assert len(changes) > 0
+
+
+def test_apply_preserves_comments(tmp_path):
+    p = _yaml_fixture(tmp_path)
+    apply_combo_to_yaml(p, "QQQ", _winner_combo())
+    text = p.read_text()
+    assert "# buy on this dip" in text
+
+
+def test_apply_preserves_unrelated_keys(tmp_path):
+    p = _yaml_fixture(tmp_path)
+    apply_combo_to_yaml(p, "QQQ", _winner_combo())
+    text = p.read_text()
+    # Things NOT in our update list must be untouched
+    assert "min_trade_usd: 5.0" in text
+    assert "max_open_lots: 5" in text
+    assert "sma_long_period: 200" in text
+    assert "starting_cash: 100.0" in text
+    assert "price_source: yfinance" in text
+
+
+def test_apply_returns_changes_list(tmp_path):
+    p = _yaml_fixture(tmp_path)
+    changes = apply_combo_to_yaml(p, "QQQ", _winner_combo())
+    joined = "\n".join(changes)
+    assert "dip_percent" in joined
+    assert "0.02" in joined and "0.05" in joined  # before/after for dip
+
+
+def test_apply_no_changes_when_already_matching(tmp_path):
+    p = _yaml_fixture(tmp_path)
+    # Combo that matches the QQQ defaults exactly
+    same = Combo(
+        dip_percent=0.02,
+        profit_percent=0.04,
+        stop_loss_percent=0.15,
+        require_rsi_oversold=True,
+        rsi_threshold=35,
+        require_uptrend=True,
+        trailing_take_profit=False,
+        trail_percent=0.02,
+    )
+    changes = apply_combo_to_yaml(p, "QQQ", same)
+    assert changes == []
+
+
+def test_apply_validates_after_write(tmp_path):
+    """If the result is invalid YAML, the original should be restored."""
+    p = _yaml_fixture(tmp_path)
+    original = p.read_text()
+    # Corrupt the apply path: pass a combo with an out-of-range value
+    # by mutating the dataclass post-construction. Pydantic validates on load.
+    # Easiest: swap the YAML to something that won't parse back.
+    bad = Combo(
+        dip_percent=999.0,  # >= 0.5 will fail TickerConfig validation
+        profit_percent=0.04,
+        stop_loss_percent=0.15,
+        require_rsi_oversold=True,
+        rsi_threshold=35,
+        require_uptrend=True,
+        trailing_take_profit=False,
+        trail_percent=0.02,
+    )
+    try:
+        apply_combo_to_yaml(p, "QQQ", bad)
+    except RuntimeError:
+        pass
+    # File must be restored
+    assert p.read_text() == original

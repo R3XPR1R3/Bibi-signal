@@ -61,8 +61,10 @@ def _run_backtest(args: argparse.Namespace) -> int:
 
 
 def _run_optimize(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
     from .config import StrategyConfig
-    from .optimize import optimize_ticker
+    from .optimize import maybe_apply, optimize_ticker
 
     strategy = StrategyConfig.from_yaml(args.config)
     if args.ticker not in strategy.tickers:
@@ -80,6 +82,7 @@ def _run_optimize(args: argparse.Namespace) -> int:
         train_frac=args.train_frac,
     )
     print(report.render(top=args.top))
+    maybe_apply(report, Path(args.config), args.apply, interactive=sys.stdin.isatty())
     return 0
 
 
@@ -167,6 +170,9 @@ def run() -> None:
                         help="[optimize] how many top combos to print (default: 10)")
     parser.add_argument("--train-frac", type=float, default=0.7,
                         help="[optimize] fraction of history used for training (default: 0.7)")
+    parser.add_argument("--apply", type=int, default=None,
+                        help="[optimize] auto-apply rank N (1-based) to config.yaml; "
+                             "if omitted and TTY, you'll be prompted")
 
     # paper-only
     parser.add_argument("--once", action="store_true",

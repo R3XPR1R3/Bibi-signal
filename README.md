@@ -121,23 +121,41 @@ no risk       no risk       your risk
 Grid-searches strategy parameters across years of historical data with a
 **train/test split** to detect overfitting. Train (default 70%) is used
 to find candidate combos in parallel across CPU cores; the top 30 are
-then evaluated on the held-out test set (default 30%).
+then evaluated on the held-out test set (default 30%). The grid sweeps
+dip / profit / stop-loss / RSI threshold / trend filter / **trailing
+take-profit + trail percent** — 3000 combos total. Output is a table
+sorted by test-set score.
 
 ```bash
 bibi-signal --mode optimize --ticker QQQ --years 5 --top 10
 bibi-signal --mode optimize --ticker XLE --years 5 --workers 4
 ```
 
-Output is a table sorted by test-set score. Pick a row where:
+Pick a row where:
 - TEST return is positive,
 - TEST drawdown isn't worse than you can stomach,
 - the ⚠️ overfit flag is **not** set (train ≫ test = the combo got lucky on
   history but probably won't generalize).
 
-Then copy those values into `config.yaml` and re-run `--mode backtest`
-to verify. **Optimize is not "AI prediction"** — it's a deterministic search
-over parameter space, with overfitting protection. Markets in the future
-won't be the same as the past, so consider the result a starting point,
+**Auto-apply**: when stdin is a terminal, optimize asks at the end which
+rank to apply to `config.yaml`. Or pass `--apply N` to skip the prompt:
+
+```bash
+bibi-signal --mode optimize --ticker QQQ --years 5 --apply 1   # apply best combo
+```
+
+The 8 strategy fields for that ticker (dip, profit, stop, RSI on/off,
+RSI threshold, uptrend on/off, trailing on/off, trail percent) are
+rewritten in place; comments and unrelated keys are preserved, the
+result is validated as a valid `StrategyConfig` before saving (with a
+backup-and-restore on validation failure).
+
+After apply, run a quick `--mode backtest` to confirm the numbers match
+what optimize promised, then move on to paper trading.
+
+**Optimize is not "AI prediction"** — it's a deterministic search over
+parameter space with overfitting protection. Markets in the future
+won't be the same as the past; consider the result a starting point,
 not a guarantee.
 
 ### 1. Backtest — historical replay (one-shot, no setup)
