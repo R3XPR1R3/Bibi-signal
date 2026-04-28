@@ -34,6 +34,7 @@ from .strategy import (
     SignalProposal,
     compute_targets,
     evaluate,
+    trail_updates,
 )
 
 log = structlog.get_logger(__name__)
@@ -56,6 +57,8 @@ def _to_ticker_config(c: CryptoTickerConfig) -> TickerConfig:
         rsi_threshold=c.rsi_threshold,
         require_uptrend=c.require_uptrend,
         sma_long_period=c.sma_long_period,
+        trailing_take_profit=getattr(c, "trailing_take_profit", False),
+        trail_percent=getattr(c, "trail_percent", 0.02),
     )
 
 
@@ -103,18 +106,35 @@ def evaluate_crypto_ticker(
 
     opens = db.open_lots(session, LIVE, symbol)
     free_cash = float(db.get_cash(session, LIVE))
-    snapshots = [
-        LotSnapshot(
-            id=l.id,
-            ticker=l.ticker,
-            buy_price=float(l.buy_price),
-            quantity=float(l.quantity),
-            target_price=float(l.target_price),
-            stop_price=float(l.stop_price),
-        )
-        for l in opens
-    ]
-    proposals = evaluate(_to_ticker_config(cfg), market, snapshots, free_cash)
+
+    def _snap():
+        return [
+            LotSnapshot(
+                id=l.id, ticker=l.ticker,
+                buy_price=float(l.buy_price), quantity=float(l.quantity),
+                target_price=float(l.target_price), stop_price=float(l.stop_price),
+                peak_price=float(l.peak_price) if l.peak_price is not None else None,
+                trail_active=bool(l.trail_active),
+            )
+            for l in opens
+        ]
+
+    tcfg = _to_ticker_config(cfg)
+    snapshots = _snap()
+    updates = trail_updates(tcfg, snapshots, market.price)
+    if updates:
+        by_id = {l.id: l for l in opens}
+        for upd in updates:
+            row = by_id.get(upd.lot_id)
+            if row is None:
+                continue
+            if upd.arm:
+                row.trail_active = True
+            if upd.new_peak_price is not None:
+                row.peak_price = Decimal(str(upd.new_peak_price))
+        session.flush()
+        snapshots = _snap()
+    proposals = evaluate(tcfg, market, snapshots, free_cash)
 
     actionable = [p for p in proposals if p.kind != SignalKind.HOLD]
     if not auto_execute or client is None:

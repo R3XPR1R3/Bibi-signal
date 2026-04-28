@@ -21,7 +21,7 @@ trade manually in the Robinhood app.
 ## Install (Raspberry Pi or any Debian/Ubuntu)
 
 One-shot setup script — installs system packages, creates a venv, installs
-Python deps, and runs the test suite:
+Python deps (dev + alpaca by default), and runs the test suite:
 
 ```bash
 git clone <this-repo>
@@ -29,20 +29,27 @@ cd Bibi-signal
 bash scripts/setup-rpi.sh
 ```
 
-After that:
+After that, just one command to launch:
 
 ```bash
-source .venv/bin/activate
-bibi-tui                # interactive console launcher (recommended on Pi)
+bash scripts/run.sh                                    # interactive TUI
+bash scripts/run.sh backtest --ticker QQQ --years 5    # historical replay
+bash scripts/run.sh optimize --ticker QQQ              # parameter sweep
+bash scripts/run.sh paper                              # paper trading
+bash scripts/run.sh live                               # live signals
 ```
 
-Or if you prefer manual install:
+The launcher activates the venv automatically. If `.venv` is missing, it
+runs `setup-rpi.sh` first. To pull latest code and refresh deps:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env       # only needed for live mode
+bash scripts/update.sh                                 # default: dev only
+EXTRAS=dev,alpaca,robinhood bash scripts/update.sh     # also extras
 ```
+
+`scripts/setup-rpi.sh` and `scripts/update.sh` honor `EXTRAS=...` to pick
+which optional dependency groups install (defaults to `dev,alpaca`).
+Available extras: `dev`, `alpaca`, `robinhood`, `backtest`.
 
 ## Console launcher (`bibi-tui`)
 
@@ -114,23 +121,41 @@ no risk       no risk       your risk
 Grid-searches strategy parameters across years of historical data with a
 **train/test split** to detect overfitting. Train (default 70%) is used
 to find candidate combos in parallel across CPU cores; the top 30 are
-then evaluated on the held-out test set (default 30%).
+then evaluated on the held-out test set (default 30%). The grid sweeps
+dip / profit / stop-loss / RSI threshold / trend filter / **trailing
+take-profit + trail percent** — 3000 combos total. Output is a table
+sorted by test-set score.
 
 ```bash
 bibi-signal --mode optimize --ticker QQQ --years 5 --top 10
 bibi-signal --mode optimize --ticker XLE --years 5 --workers 4
 ```
 
-Output is a table sorted by test-set score. Pick a row where:
+Pick a row where:
 - TEST return is positive,
 - TEST drawdown isn't worse than you can stomach,
 - the ⚠️ overfit flag is **not** set (train ≫ test = the combo got lucky on
   history but probably won't generalize).
 
-Then copy those values into `config.yaml` and re-run `--mode backtest`
-to verify. **Optimize is not "AI prediction"** — it's a deterministic search
-over parameter space, with overfitting protection. Markets in the future
-won't be the same as the past, so consider the result a starting point,
+**Auto-apply**: when stdin is a terminal, optimize asks at the end which
+rank to apply to `config.yaml`. Or pass `--apply N` to skip the prompt:
+
+```bash
+bibi-signal --mode optimize --ticker QQQ --years 5 --apply 1   # apply best combo
+```
+
+The 8 strategy fields for that ticker (dip, profit, stop, RSI on/off,
+RSI threshold, uptrend on/off, trailing on/off, trail percent) are
+rewritten in place; comments and unrelated keys are preserved, the
+result is validated as a valid `StrategyConfig` before saving (with a
+backup-and-restore on validation failure).
+
+After apply, run a quick `--mode backtest` to confirm the numbers match
+what optimize promised, then move on to paper trading.
+
+**Optimize is not "AI prediction"** — it's a deterministic search over
+parameter space with overfitting protection. Markets in the future
+won't be the same as the past; consider the result a starting point,
 not a guarantee.
 
 ### 1. Backtest — historical replay (one-shot, no setup)
@@ -175,6 +200,66 @@ so you can compare. Requires `TELEGRAM_BOT_TOKEN` and
 ```bash
 bibi-signal --mode live   # or just `bibi-signal`
 ```
+
+## Price source for stocks (yfinance / alpaca / robinhood)
+
+Three options. Crypto always uses the official Robinhood Crypto API.
+
+| Source | Real-time? | Legal? | Cost | Setup |
+|---|---|---|---|---|
+| **yfinance** (default) | ~30s lag | yes | free | nothing |
+| **alpaca** ✓ recommended | yes | yes (official) | free | sign up + 2 keys |
+| **robinhood** | yes | ToS gray area | free | login + risk |
+
+If you want real-time prices, **use Alpaca**. Alpaca is the only
+recommended path for production:
+
+```bash
+pip install -e '.[alpaca]'
+
+# 1. https://alpaca.markets/ -> Sign Up (no SSN needed for paper account)
+# 2. Dashboard -> Paper Trading -> Generate API keys
+# 3. Put them in .env:
+#      ALPACA_PAPER_API_KEY=PK...
+#      ALPACA_PAPER_API_SECRET=...
+
+# 4. Switch source — either via TUI:
+bibi-tui                   # → [1] Configure → [s] Switch price source → 2
+
+#    or by hand in config.yaml:
+#      price_source: alpaca
+```
+
+You only need an Alpaca **paper** account — no live trading account
+required. Bibi-Signal does **not** use Alpaca's paper-trading orders;
+our internal `paper_engine.py` simulates trades against whichever data
+source you configure.
+
+### Robinhood as a price source (advanced, not recommended)
+
+If you specifically want the same numbers shown in the Robinhood mobile
+app, you can route prices through `robin-stocks`. **This violates
+Robinhood's ToS** and aggressive polling can lock your account. We
+mitigate with a 30-second response cache and a 30-requests/minute local
+guard, but the risk is non-zero.
+
+```bash
+pip install -e '.[robinhood]'
+# .env:
+#   ROBINHOOD_USERNAME=...
+#   ROBINHOOD_PASSWORD=...
+#   ROBINHOOD_MFA_SECRET=...   # optional, base32 TOTP seed for unattended
+bibi-rh-login                  # one-time login; session cached
+# config.yaml:
+#   price_source: robinhood
+```
+
+### Auto-fallback
+
+Whichever source you pick, if it fails (Alpaca rate limit, expired
+Robinhood session, network), the bot **automatically falls back to
+yfinance** so it doesn't crash. A warning is logged and the next tick
+will retry the configured source.
 
 ## Persistence
 
@@ -235,6 +320,52 @@ Robinhood does not expose a public API for stock/ETF orders. Unofficial
 libraries (`robin-stocks`) exist but violate the ToS and can get your
 account locked. This bot stays on the safe side: it tells you what to do,
 you tap the buttons in the app.
+
+## Trailing take-profit (let winners run)
+
+Each ticker has two exit modes:
+
+**Classic** (default, `trailing_take_profit: false`):
+the bot sells the moment a lot reaches `+profit_percent`. Predictable but
+caps gains — if the price keeps running up, you've already exited.
+
+**Trailing** (`trailing_take_profit: true`):
+when a lot reaches `+profit_percent`, instead of selling the bot **arms a
+trailing stop**. It keeps tracking the peak price; the lot is sold only
+when price retraces `trail_percent` from that peak. Lets big winners run.
+
+```yaml
+QQQ:
+  profit_percent: 0.04          # arm the trail at +4%
+  trailing_take_profit: true
+  trail_percent: 0.02           # exit when price drops 2% from the peak
+```
+
+How it plays out:
+
+| Tick | Price | Profit | Peak | Action |
+|---|---|---|---|---|
+| Buy | $100 | 0% | — | enter long |
+| 1   | $103 | +3% | — | hold (trail not armed yet) |
+| 2   | $104 | +4% | $104 | **arm trail**, peak=$104 |
+| 3   | $108 | +8% | $108 | hold, peak now $108 |
+| 4   | $112 | +12% | $112 | hold, peak now $112 |
+| 5   | $109.7 | +9.7% | $112 | **SELL** — retraced ≥2% from peak |
+
+Without the trail you would have exited tick 2 at +4% ($4 on $100). With
+the trail you exit tick 5 at +9.7% ($9.7).
+
+The downside: the trail also gives back gains during the retrace. Use the
+optimize mode to find a `trail_percent` that suits your tickers — a tight
+trail (1-2%) protects gains but exits early; a loose trail (5-10%) lets
+trends ride but gives back more on reversals.
+
+```bash
+bibi-signal --mode backtest --ticker QQQ --years 5    # compare classic vs trailing
+```
+
+(Tip: stop-loss still wins over trailing — even if armed, a price below
+`stop_price` triggers a STOP signal, not a trail-exit.)
 
 ## Internal paper-trading
 

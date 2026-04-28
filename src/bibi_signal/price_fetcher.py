@@ -69,20 +69,96 @@ def _fetch_price_raw(ticker: str) -> float:
 
 
 def get_price(ticker: str, *, use_cache: bool = True) -> Quote:
+    """Read current price via the configured price_source.
+
+    Source priority: alpaca > robinhood > yfinance fallback. If the
+    configured source fails (e.g., expired Alpaca key, lost Robinhood
+    session), we automatically fall back to yfinance so the bot stays
+    alive — a warning is logged.
+    """
+    source = _resolve_source()
+    if source == "alpaca":
+        try:
+            return _get_price_alpaca(ticker, use_cache=use_cache)
+        except Exception as e:
+            log.warning("alpaca_price_failed_falling_back_to_yfinance",
+                        ticker=ticker, error=str(e))
+    elif source == "robinhood":
+        try:
+            return _get_price_robinhood(ticker, use_cache=use_cache)
+        except Exception as e:
+            log.warning("robinhood_price_failed_falling_back_to_yfinance",
+                        ticker=ticker, error=str(e))
+    return _get_price_yfinance(ticker, use_cache=use_cache)
+
+
+def _get_price_yfinance(ticker: str, *, use_cache: bool = True) -> Quote:
     now = time.time()
     if use_cache and ticker in _price_cache:
         price, fetched_at = _price_cache[ticker]
         if now - fetched_at < _PRICE_TTL_SECONDS:
             return Quote(ticker, price, datetime.fromtimestamp(fetched_at, tz=timezone.utc))
-
     try:
         price = _fetch_price_raw(ticker)
     except Exception as e:
-        log.error("price_fetch_failed", ticker=ticker, error=str(e))
+        log.error("yfinance_price_fetch_failed", ticker=ticker, error=str(e))
         raise PriceUnavailable(f"failed to fetch {ticker}: {e}") from e
-
     _price_cache[ticker] = (price, now)
     return Quote(ticker, price, datetime.fromtimestamp(now, tz=timezone.utc))
+
+
+# ---------- Robinhood source (lazy-loaded) ----------
+
+_rh_source = None  # singleton RobinhoodPriceSource
+_active_source: str | None = None  # set by set_price_source()
+
+
+def set_price_source(source: str) -> None:
+    """Called once at startup from main.py based on StrategyConfig.price_source."""
+    global _active_source
+    _active_source = source
+
+
+def _resolve_source() -> str:
+    return _active_source or "yfinance"
+
+
+def _get_robinhood_source():
+    global _rh_source
+    if _rh_source is None:
+        from .robinhood_stocks import RobinhoodPriceSource  # lazy import
+        _rh_source = RobinhoodPriceSource()
+    return _rh_source
+
+
+def _get_price_robinhood(ticker: str, *, use_cache: bool = True) -> Quote:
+    src = _get_robinhood_source()
+    if not use_cache:
+        src.clear_cache()
+    rq = src.get_price(ticker)
+    return Quote(ticker, rq.price, rq.fetched_at)
+
+
+# ---------- Alpaca source (lazy-loaded) ----------
+
+_alpaca_source = None
+
+
+def _get_alpaca_source():
+    global _alpaca_source
+    if _alpaca_source is None:
+        from .alpaca_data import AlpacaPriceSource  # lazy import
+        from .config import AppSettings
+        _alpaca_source = AlpacaPriceSource(AppSettings())
+    return _alpaca_source
+
+
+def _get_price_alpaca(ticker: str, *, use_cache: bool = True) -> Quote:
+    src = _get_alpaca_source()
+    if not use_cache:
+        src.clear_cache()
+    aq = src.get_price(ticker)
+    return Quote(ticker, aq.price, aq.fetched_at)
 
 
 @retry(

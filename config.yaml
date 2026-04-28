@@ -11,6 +11,15 @@ check_frequency_minutes: 10
 # Trading hours filter (US/Eastern). Bot only signals when market is open.
 respect_market_hours: true
 
+# Where to read live STOCK prices.
+#   yfinance  — default fallback; free, ~30s lag, scrapes Yahoo
+#   alpaca    — real-time IEX, free official API ✓ recommended
+#               needs `pip install -e '.[alpaca]'` and ALPACA_PAPER_API_KEY/SECRET in .env
+#   robinhood — unofficial via robin-stocks; real-time, ToS gray area
+#               needs `pip install -e '.[robinhood]'` then `bibi-rh-login`
+# Crypto always uses the official Robinhood Crypto API regardless of this.
+price_source: yfinance
+
 # Per-asset configuration.
 tickers:
   QQQ:
@@ -27,6 +36,11 @@ tickers:
     rsi_threshold: 35
     require_uptrend: true     # skip buys when price < 200-day SMA
     sma_long_period: 200
+    # Trailing take-profit. Off by default = lot sells at exactly profit_percent.
+    # On  = at profit_percent the trail "arms"; bot tracks peak and only sells
+    #       on trail_percent retrace from peak. Lets big winners run further.
+    trailing_take_profit: false
+    trail_percent: 0.02
 
   XLE:
     enabled: true
@@ -42,6 +56,8 @@ tickers:
     rsi_threshold: 35
     require_uptrend: true
     sma_long_period: 200
+    trailing_take_profit: false
+    trail_percent: 0.025
 
 # How profit is reinvested.
 # all_to_pool — 100% of sale proceeds back to cash pool (default).

@@ -116,9 +116,9 @@ def _config_snippet() -> str:
         tickers = ", ".join(sc.tickers.keys())
         bits = [
             f"tickers: {tickers}",
+            f"src: {sc.price_source}",
             f"interval: {sc.check_frequency_minutes}m",
             f"crypto: {'on' if sc.crypto.enabled else 'off'}",
-            f"dividends: {'on' if sc.dividends.enabled else 'off'}",
         ]
         return " · ".join(bits)
     except Exception as e:
@@ -153,8 +153,13 @@ def header() -> None:
 ENV_FIELDS = [
     ("TELEGRAM_BOT_TOKEN", "Telegram bot token (from @BotFather)"),
     ("TELEGRAM_ALLOWED_CHAT_IDS", "Allowed Telegram chat IDs (comma-separated)"),
-    ("ROBINHOOD_CRYPTO_API_KEY", "Robinhood Crypto API key (optional)"),
+    ("ALPACA_PAPER_API_KEY", "Alpaca API key (real-time stock prices)"),
+    ("ALPACA_PAPER_API_SECRET", "Alpaca API secret"),
+    ("ROBINHOOD_CRYPTO_API_KEY", "Robinhood Crypto API key (for crypto)"),
     ("ROBINHOOD_CRYPTO_PRIVATE_KEY_B64", "Robinhood Crypto Ed25519 private seed (base64)"),
+    ("ROBINHOOD_USERNAME", "Robinhood email (for unofficial stock prices)"),
+    ("ROBINHOOD_PASSWORD", "Robinhood password (unofficial)"),
+    ("ROBINHOOD_MFA_SECRET", "Robinhood TOTP secret (optional, for unattended)"),
     ("LOG_LEVEL", "Log level (DEBUG|INFO|WARNING|ERROR)"),
 ]
 
@@ -167,6 +172,44 @@ def _mask(value: str) -> str:
     return value[:4] + "***" + value[-4:]
 
 
+def _switch_price_source() -> None:
+    """Rewrites the `price_source:` line in config.yaml in-place."""
+    if not CONFIG_PATH.exists():
+        print(red("\n  config.yaml not found"))
+        pause()
+        return
+    print(bold("\n  Switch price source"))
+    print("   [1] yfinance  — free, ~30s lag, default fallback")
+    print("   [2] alpaca    — real-time, free official API ✓ recommended")
+    print("   [3] robinhood — real-time, unofficial, ToS gray area")
+    choice = input("\n  > ").strip()
+    mapping = {"1": "yfinance", "2": "alpaca", "3": "robinhood"}
+    new_source = mapping.get(choice)
+    if not new_source:
+        return
+    text = CONFIG_PATH.read_text()
+    lines = text.splitlines()
+    rewritten = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("price_source:"):
+            indent = line[: len(line) - len(stripped)]
+            lines[i] = f"{indent}price_source: {new_source}"
+            rewritten = True
+            break
+    if not rewritten:
+        lines.append(f"price_source: {new_source}")
+    CONFIG_PATH.write_text("\n".join(lines) + "\n")
+    print(green(f"  ✓ price_source = {new_source}"))
+    if new_source == "alpaca":
+        print(dim("  Make sure ALPACA_PAPER_API_KEY/SECRET are set."))
+        print(dim("  Install dep: pip install -e '.[alpaca]'"))
+    elif new_source == "robinhood":
+        print(dim("  Run `bibi-rh-login` once to cache the session."))
+        print(dim("  Install dep: pip install -e '.[robinhood]'"))
+    pause()
+
+
 def _menu_configure() -> None:
     while True:
         header()
@@ -176,12 +219,16 @@ def _menu_configure() -> None:
             shown = _mask(env.get(key, ""))
             print(f"   [{i}] {desc}\n       {dim(key)} = {shown}")
         editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi")
-        print(f"\n   [c] Open config.yaml in {editor or '$EDITOR'}")
+        print(f"\n   [s] Switch price source (yfinance / alpaca / robinhood)")
+        print(f"   [c] Open config.yaml in {editor or '$EDITOR'}")
         print(f"   [v] View current config.yaml")
         print(f"   [0] Back")
         choice = input("\n  > ").strip().lower()
         if choice == "0" or choice == "":
             return
+        if choice == "s":
+            _switch_price_source()
+            continue
         if choice == "c":
             if editor:
                 subprocess.call([editor, str(CONFIG_PATH)])

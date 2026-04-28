@@ -33,6 +33,7 @@ from .strategy import (
     SignalKind,
     SignalProposal,
     evaluate,
+    trail_updates,
 )
 from .telegram_bot import broadcast
 
@@ -103,9 +104,35 @@ async def evaluate_ticker(
                 quantity=float(l.quantity),
                 target_price=float(l.target_price),
                 stop_price=float(l.stop_price),
+                peak_price=float(l.peak_price) if l.peak_price is not None else None,
+                trail_active=bool(l.trail_active),
             )
             for l in opens
         ]
+        # Apply any trail-state updates (arm + peak) before evaluating SELL.
+        updates = trail_updates(cfg, snapshots, market.price)
+        if updates:
+            by_id = {l.id: l for l in opens}
+            for upd in updates:
+                row = by_id.get(upd.lot_id)
+                if row is None:
+                    continue
+                if upd.arm:
+                    row.trail_active = True
+                if upd.new_peak_price is not None:
+                    row.peak_price = Decimal(str(upd.new_peak_price))
+            session.flush()
+            # Refresh snapshots so evaluate() sees the new peak/arm state.
+            snapshots = [
+                LotSnapshot(
+                    id=l.id, ticker=l.ticker,
+                    buy_price=float(l.buy_price), quantity=float(l.quantity),
+                    target_price=float(l.target_price), stop_price=float(l.stop_price),
+                    peak_price=float(l.peak_price) if l.peak_price is not None else None,
+                    trail_active=bool(l.trail_active),
+                )
+                for l in opens
+            ]
         proposals = evaluate(cfg, market, snapshots, free_cash)
 
         new_proposals: list[SignalProposal] = []

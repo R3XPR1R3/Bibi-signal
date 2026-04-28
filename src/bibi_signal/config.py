@@ -23,6 +23,13 @@ class TickerConfig(BaseModel):
     rsi_threshold: float = Field(default=35, ge=0, le=100)
     require_uptrend: bool = True
     sma_long_period: int = Field(default=200, ge=20, le=500)
+    # Trailing take-profit. When False (default) the bot sells the moment
+    # price hits buy_price * (1 + profit_percent). When True, hitting that
+    # level instead "arms" the trail: bot keeps the lot open and tracks the
+    # peak price. Sells only when price retraces trail_percent from the peak.
+    # This lets winners run while still locking in gains on reversals.
+    trailing_take_profit: bool = False
+    trail_percent: float = Field(default=0.02, gt=0, lt=0.5)
 
     @field_validator("max_trade_usd")
     @classmethod
@@ -77,6 +84,8 @@ class CryptoTickerConfig(BaseModel):
     require_rsi_oversold: bool = True
     rsi_threshold: float = Field(default=35, ge=0, le=100)
     sma_long_period: int = Field(default=100, ge=20, le=500)
+    trailing_take_profit: bool = False
+    trail_percent: float = Field(default=0.03, gt=0, lt=0.5)
 
 
 class CryptoConfig(BaseModel):
@@ -91,6 +100,12 @@ class StrategyConfig(BaseModel):
     starting_cash: float = Field(gt=0)
     check_frequency_minutes: int = Field(ge=1, le=240)
     respect_market_hours: bool = True
+    # Where to read live STOCK prices.
+    #   yfinance  — free, ~30s lag, unofficial Yahoo scraping (default fallback)
+    #   alpaca    — real-time IEX, free official API ✓ recommended
+    #   robinhood — unofficial via robin-stocks, ToS gray area, account-lock risk
+    # Crypto always uses the official Robinhood Crypto API regardless.
+    price_source: Literal["yfinance", "alpaca", "robinhood"] = "yfinance"
     tickers: dict[str, TickerConfig]
     reinvest: ReinvestConfig = ReinvestConfig()
     notifications: NotificationConfig = NotificationConfig()
@@ -123,6 +138,12 @@ class AppSettings(BaseSettings):
     robinhood_crypto_api_key: str = ""
     robinhood_crypto_private_key_b64: str = ""  # base64-encoded Ed25519 private key seed
     robinhood_crypto_base_url: str = "https://trading.robinhood.com"
+
+    # Robinhood STOCKS via robin-stocks (UNOFFICIAL, ToS gray area, use at your own risk).
+    # First-time setup: run `bibi-rh-login` once to cache the session.
+    robinhood_username: str = ""
+    robinhood_password: str = ""
+    robinhood_mfa_secret: str = ""  # base32 TOTP seed for unattended re-auth
 
     @property
     def allowed_chat_ids(self) -> set[int]:
