@@ -43,6 +43,8 @@ DEFAULT_GRID: dict[str, list] = {
     "require_rsi_oversold": [True, False],
     "rsi_threshold": [30, 35, 50, 70],
     "require_uptrend": [True, False],
+    "trailing_take_profit": [False, True],
+    "trail_percent": [0.02, 0.05, 0.10],
 }
 
 
@@ -54,6 +56,8 @@ class Combo:
     require_rsi_oversold: bool
     rsi_threshold: float
     require_uptrend: bool
+    trailing_take_profit: bool
+    trail_percent: float
 
     def to_ticker_config(self, *, base: TickerConfig) -> TickerConfig:
         """Apply this combo on top of a baseline config."""
@@ -71,6 +75,8 @@ class Combo:
             rsi_threshold=self.rsi_threshold,
             require_uptrend=self.require_uptrend,
             sma_long_period=base.sma_long_period,
+            trailing_take_profit=self.trailing_take_profit,
+            trail_percent=self.trail_percent,
         )
 
 
@@ -80,9 +86,12 @@ def generate_combos(grid: dict[str, list] | None = None) -> list[Combo]:
     out: list[Combo] = []
     for values in itertools.product(*(grid[k] for k in keys)):
         kw = dict(zip(keys, values))
-        # Skip dominated combos: if RSI filter is OFF, threshold doesn't matter,
-        # so keep only one threshold to avoid dups.
+        # Dedupe dominated combos:
+        #   - When RSI filter is OFF, threshold doesn't matter — keep one.
+        #   - When trailing is OFF, trail_percent doesn't matter — keep one.
         if not kw["require_rsi_oversold"] and kw["rsi_threshold"] != grid["rsi_threshold"][0]:
+            continue
+        if not kw["trailing_take_profit"] and kw["trail_percent"] != grid["trail_percent"][0]:
             continue
         out.append(Combo(**kw))
     return out
@@ -173,7 +182,7 @@ class OptimizeReport:
         col = (
             f"{'rank':>4}  "
             f"{'dip':>5} {'profit':>6} {'stop':>5} "
-            f"{'rsi':>10} {'uptrend':>7} | "
+            f"{'rsi':>10} {'up':>3} {'trail':>7} | "
             f"{'tr ret%':>7} {'tr dd%':>6} {'tr#':>4} | "
             f"{'te ret%':>7} {'te dd%':>6} {'te#':>4} | "
             f"{'te BH%':>7}  overfit"
@@ -185,12 +194,13 @@ class OptimizeReport:
             te: Score = r["test"]
             rsi_label = f"<{int(c.rsi_threshold)}" if c.require_rsi_oversold else "off"
             up = "yes" if c.require_uptrend else "no"
+            trail = f"{c.trail_percent*100:.1f}%" if c.trailing_take_profit else "off"
             overfit = "⚠️" if (tr.return_pct - te.return_pct) > max(20, abs(te.return_pct)) else " "
             lines.append(
                 f"{i:>4}  "
                 f"{c.dip_percent*100:>5.1f} {c.profit_percent*100:>6.1f} "
                 f"{c.stop_loss_percent*100:>5.1f} "
-                f"{rsi_label:>10} {up:>7} | "
+                f"{rsi_label:>10} {up:>3} {trail:>7} | "
                 f"{tr.return_pct:>7.1f} {tr.max_drawdown_pct:>6.1f} {tr.n_trades:>4d} | "
                 f"{te.return_pct:>7.1f} {te.max_drawdown_pct:>6.1f} {te.n_trades:>4d} | "
                 f"{te.buy_hold_pct:>7.1f}  {overfit}"

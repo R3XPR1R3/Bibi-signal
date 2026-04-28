@@ -39,8 +39,13 @@ source .venv/bin/activate
 python -m pip install --upgrade pip wheel setuptools
 
 # ---------- 3. python deps ----------
-echo "[3/5] Installing Python dependencies (this can take 5-15 min on a Pi)…"
-pip install -e ".[dev]"
+# EXTRAS controls which optional dependency groups to install.
+# Default: dev,alpaca (alpaca is recommended for real-time prices).
+# Add 'robinhood' if you want unofficial Robinhood stocks via robin-stocks.
+EXTRAS="${EXTRAS:-dev,alpaca}"
+echo "[3/5] Installing Python dependencies with extras [$EXTRAS]"
+echo "      (this can take 5-15 min on a Pi)…"
+pip install -e ".[$EXTRAS]"
 
 # ---------- 4. config + env scaffolding ----------
 echo "[4/5] Setting up config files…"
@@ -65,13 +70,14 @@ cat <<EOF
 
 ✓ Setup complete.
 
-Next steps:
-  source .venv/bin/activate
-  bibi-tui                 # interactive launcher (configure + run modes)
+Quick launchers:
+  bash scripts/run.sh              # opens the TUI
+  bash scripts/run.sh paper        # paper trading
+  bash scripts/run.sh backtest --ticker QQQ --years 5
+  bash scripts/run.sh optimize --ticker QQQ
 
-Or directly:
-  bibi-signal --mode paper --once --no-market-hours    # smoke test
-  bibi-signal --mode optimize --ticker QQQ --years 5   # find good params
+After git pull, refresh deps with:
+  bash scripts/update.sh
 
 To run the bot 24/7 on this Pi as a system service, see:
   scripts/bibi-signal.service.example

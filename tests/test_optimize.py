@@ -42,9 +42,10 @@ def _base_cfg() -> TickerConfig:
 
 def test_generate_combos_default_count():
     combos = generate_combos()
-    # 5 dip * 5 profit * 3 stop * 4 rsi-th * 2 uptrend  for require_rsi=True  = 600
-    # 5 dip * 5 profit * 3 stop * 1 rsi-th * 2 uptrend  for require_rsi=False = 150
-    assert len(combos) == 750
+    # base = 5 dip * 5 profit * 3 stop * 2 uptrend = 150
+    # with require_rsi_oversold: 4 thresholds, off: 1 -> rsi_dim = 4 + 1 = 5 -> 750 base combos
+    # with trailing: 3 trail percents, off: 1 -> trail_dim = 3 + 1 = 4 -> 750 * 4 = 3000
+    assert len(combos) == 3000
 
 
 def test_generate_combos_custom_grid():
@@ -55,9 +56,15 @@ def test_generate_combos_custom_grid():
         "require_rsi_oversold": [True],
         "rsi_threshold": [35],
         "require_uptrend": [True, False],
+        "trailing_take_profit": [False, True],
+        "trail_percent": [0.02, 0.05],
     }
     combos = generate_combos(grid)
-    assert len(combos) == 4  # 1 * 2 * 1 * 1 * 1 * 2
+    # 1 * 2 * 1 * 1 * 1 * 2 = 4 base combos
+    # trailing off: 1 trail_percent (deduped) -> 4
+    # trailing on: 2 trail_percents -> 8
+    # total: 4 + 8 = 12
+    assert len(combos) == 12
 
 
 def test_combo_to_ticker_config_inherits_base():
@@ -69,14 +76,36 @@ def test_combo_to_ticker_config_inherits_base():
         require_rsi_oversold=False,
         rsi_threshold=30,
         require_uptrend=False,
+        trailing_take_profit=True,
+        trail_percent=0.05,
     )
     cfg = combo.to_ticker_config(base=base)
     assert cfg.dip_percent == 0.05
     assert cfg.profit_percent == 0.10
     assert cfg.require_uptrend is False
+    assert cfg.trailing_take_profit is True
+    assert cfg.trail_percent == 0.05
     # Inherited from base:
     assert cfg.min_trade_usd == base.min_trade_usd
     assert cfg.sma_long_period == base.sma_long_period
+
+
+def test_generate_combos_dedupes_trail_percent_when_trailing_off():
+    grid = {
+        "dip_percent": [0.02],
+        "profit_percent": [0.04],
+        "stop_loss_percent": [0.15],
+        "require_rsi_oversold": [True],
+        "rsi_threshold": [35],
+        "require_uptrend": [True],
+        "trailing_take_profit": [False],
+        "trail_percent": [0.02, 0.05, 0.10],
+    }
+    combos = generate_combos(grid)
+    # Only one combo even though trail_percent has 3 values, because
+    # trailing is off so trail_percent is dominated.
+    assert len(combos) == 1
+    assert combos[0].trail_percent == 0.02  # the first value
 
 
 def _fake_result(total_equity: float, max_dd: float, n_buys: int, bh: float = 100.0) -> BTResult:

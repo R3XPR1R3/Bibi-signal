@@ -21,7 +21,7 @@ trade manually in the Robinhood app.
 ## Install (Raspberry Pi or any Debian/Ubuntu)
 
 One-shot setup script — installs system packages, creates a venv, installs
-Python deps, and runs the test suite:
+Python deps (dev + alpaca by default), and runs the test suite:
 
 ```bash
 git clone <this-repo>
@@ -29,20 +29,27 @@ cd Bibi-signal
 bash scripts/setup-rpi.sh
 ```
 
-After that:
+After that, just one command to launch:
 
 ```bash
-source .venv/bin/activate
-bibi-tui                # interactive console launcher (recommended on Pi)
+bash scripts/run.sh                                    # interactive TUI
+bash scripts/run.sh backtest --ticker QQQ --years 5    # historical replay
+bash scripts/run.sh optimize --ticker QQQ              # parameter sweep
+bash scripts/run.sh paper                              # paper trading
+bash scripts/run.sh live                               # live signals
 ```
 
-Or if you prefer manual install:
+The launcher activates the venv automatically. If `.venv` is missing, it
+runs `setup-rpi.sh` first. To pull latest code and refresh deps:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env       # only needed for live mode
+bash scripts/update.sh                                 # default: dev only
+EXTRAS=dev,alpaca,robinhood bash scripts/update.sh     # also extras
 ```
+
+`scripts/setup-rpi.sh` and `scripts/update.sh` honor `EXTRAS=...` to pick
+which optional dependency groups install (defaults to `dev,alpaca`).
+Available extras: `dev`, `alpaca`, `robinhood`, `backtest`.
 
 ## Console launcher (`bibi-tui`)
 
