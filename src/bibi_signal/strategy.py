@@ -36,13 +36,20 @@ class SignalKind(str, Enum):
 
 @dataclass(frozen=True)
 class LotSnapshot:
-    """Subset of a Lot row needed for decisions. Decimal-friendly."""
+    """Subset of a Lot row needed for decisions. Decimal-friendly.
+
+    `peak_price` is the highest price observed since entry; `trail_active`
+    means the trailing take-profit has been armed (price hit profit_percent
+    at least once). Callers must update both before invoking evaluate().
+    """
     id: int
     ticker: str
     buy_price: float
     quantity: float
     target_price: float
     stop_price: float
+    peak_price: float | None = None
+    trail_active: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,17 +107,8 @@ def evaluate(
 
     # 1. Exit decisions on every open lot — independent of buy gating.
     for lot in open_lots_for_ticker:
-        if market.price >= lot.target_price:
-            proposals.append(
-                SignalProposal(
-                    kind=SignalKind.SELL,
-                    ticker=market.ticker,
-                    price=market.price,
-                    lot_id=lot.id,
-                    reason=f"price {market.price:.2f} >= target {lot.target_price:.2f}",
-                )
-            )
-        elif market.price <= lot.stop_price:
+        # Stop-loss always wins (caps downside even when trailing armed).
+        if market.price <= lot.stop_price:
             proposals.append(
                 SignalProposal(
                     kind=SignalKind.STOP,
@@ -120,6 +118,43 @@ def evaluate(
                     reason=f"price {market.price:.2f} <= stop {lot.stop_price:.2f}",
                 )
             )
+            continue
+
+        if cfg.trailing_take_profit:
+            # Trailing mode. Two phases:
+            #   not armed: hold until price hits target_price (= profit_percent above entry)
+            #   armed:     keep updating peak; sell only on retrace
+            if not lot.trail_active:
+                # Caller will arm us next tick once price >= target. Until then, hold.
+                continue
+            peak = lot.peak_price if lot.peak_price is not None else lot.buy_price
+            trail_stop = peak * (1 - cfg.trail_percent)
+            if market.price <= trail_stop:
+                proposals.append(
+                    SignalProposal(
+                        kind=SignalKind.SELL,
+                        ticker=market.ticker,
+                        price=market.price,
+                        lot_id=lot.id,
+                        reason=(
+                            f"trail: price {market.price:.2f} <= "
+                            f"peak {peak:.2f} - {cfg.trail_percent*100:.1f}% "
+                            f"= {trail_stop:.2f}"
+                        ),
+                    )
+                )
+        else:
+            # Classic fixed-target mode (original behaviour).
+            if market.price >= lot.target_price:
+                proposals.append(
+                    SignalProposal(
+                        kind=SignalKind.SELL,
+                        ticker=market.ticker,
+                        price=market.price,
+                        lot_id=lot.id,
+                        reason=f"price {market.price:.2f} >= target {lot.target_price:.2f}",
+                    )
+                )
 
     # 2. Entry decision (only if no exit fired this tick — keeps reasoning clean).
     if proposals:
@@ -228,3 +263,45 @@ def compute_targets(buy_price: float, cfg: TickerConfig) -> tuple[float, float]:
 
 def realised_pnl(buy_price: Decimal, sell_price: Decimal, quantity: Decimal) -> Decimal:
     return (sell_price - buy_price) * quantity
+
+
+@dataclass(frozen=True)
+class TrailUpdate:
+    """Mutation a caller should apply to a lot before evaluating SELL conditions.
+
+    new_peak_price is None if the peak didn't change. arm is True only on
+    the tick that the trail first activates.
+    """
+    lot_id: int
+    new_peak_price: float | None
+    arm: bool
+
+
+def trail_updates(
+    cfg: TickerConfig,
+    open_lots_for_ticker: list[LotSnapshot],
+    current_price: float,
+) -> list[TrailUpdate]:
+    """Compute peak/arm state changes for one tick. No side effects.
+
+    Caller persists the returned updates (DB, in-memory) before calling
+    evaluate(), so the SELL decision uses fresh state.
+    """
+    if not cfg.trailing_take_profit:
+        return []
+    out: list[TrailUpdate] = []
+    for lot in open_lots_for_ticker:
+        # Should we arm? (price reached the activation threshold for the first time)
+        activation = lot.buy_price * (1 + cfg.profit_percent)
+        arm = (not lot.trail_active) and current_price >= activation
+
+        # Should we update the peak? Only meaningful once armed (or arming this tick).
+        new_peak: float | None = None
+        if lot.trail_active or arm:
+            current_peak = lot.peak_price if lot.peak_price is not None else lot.buy_price
+            if current_price > current_peak:
+                new_peak = current_price
+
+        if arm or new_peak is not None:
+            out.append(TrailUpdate(lot_id=lot.id, new_peak_price=new_peak, arm=arm))
+    return out

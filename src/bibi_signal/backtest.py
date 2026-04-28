@@ -43,6 +43,8 @@ class BTLot:
     opened_index: int
     closed_index: Optional[int] = None
     sell_price: Optional[float] = None
+    peak_price: Optional[float] = None
+    trail_active: bool = False
 
     def realised_pnl(self) -> float:
         if self.sell_price is None:
@@ -154,12 +156,33 @@ def run_backtest_on_df(
             fill_price: Optional[float] = None
             kind: Optional[SignalKind] = None
 
+            # Stop-loss always wins.
             if low <= lot.stop_price:
                 fill_price = lot.stop_price
                 kind = SignalKind.STOP
-            elif high >= lot.target_price:
-                fill_price = lot.target_price
-                kind = SignalKind.SELL
+            elif cfg.trailing_take_profit:
+                # Trailing mode.
+                # Arm if today's High touched the activation threshold.
+                if not lot.trail_active and high >= lot.target_price:
+                    lot.trail_active = True
+                    lot.peak_price = high  # peak is at least where we armed
+                if lot.trail_active:
+                    # Update peak to today's High if higher.
+                    peak = lot.peak_price if lot.peak_price is not None else lot.buy_price
+                    if high > peak:
+                        peak = high
+                        lot.peak_price = peak
+                    trail_stop = peak * (1 - cfg.trail_percent)
+                    # Exit if Low pierced the trail. Use trail_stop as fill;
+                    # this is a close approximation of a stop-limit fill.
+                    if low <= trail_stop and trail_stop < high:
+                        fill_price = trail_stop
+                        kind = SignalKind.SELL
+            else:
+                # Classic fixed target.
+                if high >= lot.target_price:
+                    fill_price = lot.target_price
+                    kind = SignalKind.SELL
 
             if fill_price is not None:
                 proceeds = fill_price * lot.quantity

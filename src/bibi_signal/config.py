@@ -23,6 +23,13 @@ class TickerConfig(BaseModel):
     rsi_threshold: float = Field(default=35, ge=0, le=100)
     require_uptrend: bool = True
     sma_long_period: int = Field(default=200, ge=20, le=500)
+    # Trailing take-profit. When False (default) the bot sells the moment
+    # price hits buy_price * (1 + profit_percent). When True, hitting that
+    # level instead "arms" the trail: bot keeps the lot open and tracks the
+    # peak price. Sells only when price retraces trail_percent from the peak.
+    # This lets winners run while still locking in gains on reversals.
+    trailing_take_profit: bool = False
+    trail_percent: float = Field(default=0.02, gt=0, lt=0.5)
 
     @field_validator("max_trade_usd")
     @classmethod
@@ -77,6 +84,8 @@ class CryptoTickerConfig(BaseModel):
     require_rsi_oversold: bool = True
     rsi_threshold: float = Field(default=35, ge=0, le=100)
     sma_long_period: int = Field(default=100, ge=20, le=500)
+    trailing_take_profit: bool = False
+    trail_percent: float = Field(default=0.03, gt=0, lt=0.5)
 
 
 class CryptoConfig(BaseModel):

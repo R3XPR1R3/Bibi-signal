@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum as SAEnum,
     ForeignKey,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     String,
     create_engine,
     select,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -86,6 +88,11 @@ class Lot(Base):
     status: Mapped[LotStatus] = mapped_column(SAEnum(LotStatus), default=LotStatus.OPEN, index=True)
     sell_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
     realised_pnl: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4))
+    # Trailing take-profit state. peak_price = highest seen since entry;
+    # trail_active = True once profit_percent crossed and trail engaged.
+    # Both nullable for backward compat with pre-trailing DBs.
+    peak_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
+    trail_active: Mapped[bool] = mapped_column(Boolean, default=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -137,10 +144,31 @@ def make_engine(database_url: str):
     return create_engine(database_url, echo=False, future=True)
 
 
+def _ensure_lot_trail_columns(engine) -> None:
+    """SQLite-only: idempotently add trail columns to existing DBs.
+
+    `Base.metadata.create_all` only creates missing TABLES, not missing
+    COLUMNS. For users upgrading from a pre-trailing DB, we ALTER TABLE
+    in place. Safe to run on every startup — checks PRAGMA first.
+    """
+    if not engine.url.drivername.startswith("sqlite"):
+        return  # other backends should use Alembic
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(lots)"))}
+        if "lots" not in {r[0] for r in conn.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='table'"))}:
+            return  # fresh DB — create_all will handle it
+        if "peak_price" not in cols:
+            conn.execute(text("ALTER TABLE lots ADD COLUMN peak_price NUMERIC(18,6)"))
+        if "trail_active" not in cols:
+            conn.execute(text("ALTER TABLE lots ADD COLUMN trail_active BOOLEAN DEFAULT 0"))
+
+
 def init_db(database_url: str) -> sessionmaker[Session]:
     """Create the schema if missing and return a session factory."""
     engine = make_engine(database_url)
     Base.metadata.create_all(engine)
+    _ensure_lot_trail_columns(engine)
     return sessionmaker(engine, expire_on_commit=False, class_=Session)
 
 

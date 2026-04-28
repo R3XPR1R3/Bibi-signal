@@ -296,6 +296,52 @@ libraries (`robin-stocks`) exist but violate the ToS and can get your
 account locked. This bot stays on the safe side: it tells you what to do,
 you tap the buttons in the app.
 
+## Trailing take-profit (let winners run)
+
+Each ticker has two exit modes:
+
+**Classic** (default, `trailing_take_profit: false`):
+the bot sells the moment a lot reaches `+profit_percent`. Predictable but
+caps gains — if the price keeps running up, you've already exited.
+
+**Trailing** (`trailing_take_profit: true`):
+when a lot reaches `+profit_percent`, instead of selling the bot **arms a
+trailing stop**. It keeps tracking the peak price; the lot is sold only
+when price retraces `trail_percent` from that peak. Lets big winners run.
+
+```yaml
+QQQ:
+  profit_percent: 0.04          # arm the trail at +4%
+  trailing_take_profit: true
+  trail_percent: 0.02           # exit when price drops 2% from the peak
+```
+
+How it plays out:
+
+| Tick | Price | Profit | Peak | Action |
+|---|---|---|---|---|
+| Buy | $100 | 0% | — | enter long |
+| 1   | $103 | +3% | — | hold (trail not armed yet) |
+| 2   | $104 | +4% | $104 | **arm trail**, peak=$104 |
+| 3   | $108 | +8% | $108 | hold, peak now $108 |
+| 4   | $112 | +12% | $112 | hold, peak now $112 |
+| 5   | $109.7 | +9.7% | $112 | **SELL** — retraced ≥2% from peak |
+
+Without the trail you would have exited tick 2 at +4% ($4 on $100). With
+the trail you exit tick 5 at +9.7% ($9.7).
+
+The downside: the trail also gives back gains during the retrace. Use the
+optimize mode to find a `trail_percent` that suits your tickers — a tight
+trail (1-2%) protects gains but exits early; a loose trail (5-10%) lets
+trends ride but gives back more on reversals.
+
+```bash
+bibi-signal --mode backtest --ticker QQQ --years 5    # compare classic vs trailing
+```
+
+(Tip: stop-loss still wins over trailing — even if armed, a price below
+`stop_price` triggers a STOP signal, not a trail-exit.)
+
 ## Internal paper-trading
 
 Every LIVE stock signal is *also* executed virtually in PAPER state inside

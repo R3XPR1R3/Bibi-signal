@@ -36,6 +36,11 @@ tickers:
     rsi_threshold: 35
     require_uptrend: true     # skip buys when price < 200-day SMA
     sma_long_period: 200
+    # Trailing take-profit. Off by default = lot sells at exactly profit_percent.
+    # On  = at profit_percent the trail "arms"; bot tracks peak and only sells
+    #       on trail_percent retrace from peak. Lets big winners run further.
+    trailing_take_profit: false
+    trail_percent: 0.02
 
   XLE:
     enabled: true
@@ -51,6 +56,8 @@ tickers:
     rsi_threshold: 35
     require_uptrend: true
     sma_long_period: 200
+    trailing_take_profit: false
+    trail_percent: 0.025
 
 # How profit is reinvested.
 # all_to_pool — 100% of sale proceeds back to cash pool (default).
