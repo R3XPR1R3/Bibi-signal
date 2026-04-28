@@ -96,6 +96,27 @@ class CryptoConfig(BaseModel):
     tickers: dict[str, CryptoTickerConfig] = Field(default_factory=dict)
 
 
+class MultiAssetConfig(BaseModel):
+    """Multi-asset rotation (Dual Momentum). Bot ranks a basket of ETFs by
+    recent momentum and shifts capital to the best one — handles sector
+    rotation automatically (e.g., capital flowing from QQQ to XLE during
+    a 2022-style tech crash).
+
+    All-cash defensive mode kicks in when no asset is above its long SMA,
+    avoiding broad bear markets.
+    """
+    enabled: bool = False
+    universe: list[str] = Field(
+        default_factory=lambda: ["QQQ", "XLE", "SCHD", "IWM", "GLD"]
+    )
+    lookback_days: int = Field(default=90, ge=2, le=365)
+    sma_long_period: int = Field(default=200, ge=5, le=400)
+    rebalance_frequency_days: int = Field(default=7, ge=1, le=90)
+    top_n: int = Field(default=1, ge=1, le=10)
+    defensive_ticker: str = "CASH"  # symbolic — bot just holds cash
+    starting_cash: float = Field(default=100.0, gt=0)
+
+
 class StrategyConfig(BaseModel):
     starting_cash: float = Field(gt=0)
     check_frequency_minutes: int = Field(ge=1, le=240)
@@ -112,6 +133,7 @@ class StrategyConfig(BaseModel):
     paper: PaperConfig = PaperConfig()
     dividends: DividendConfig = DividendConfig()
     crypto: CryptoConfig = CryptoConfig()
+    multi_asset: MultiAssetConfig = MultiAssetConfig()
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "StrategyConfig":

@@ -86,6 +86,35 @@ def _run_optimize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_multi_asset(args: argparse.Namespace) -> int:
+    """Backtest the dual-momentum rotation strategy across the configured universe."""
+    from .config import StrategyConfig
+    from .multi_asset_engine import run_multi_asset_backtest
+    from .price_fetcher import get_history
+
+    strategy = StrategyConfig.from_yaml(args.config)
+    cfg = strategy.multi_asset
+    if not cfg.universe:
+        print("error: multi_asset.universe is empty in config.yaml", file=sys.stderr)
+        return 2
+    period = f"{args.years}y"
+    print(f"[multi-asset] downloading {len(cfg.universe)} tickers for {period}…")
+    histories: dict = {}
+    for ticker in cfg.universe:
+        try:
+            histories[ticker] = get_history(ticker, period=period, interval="1d", use_cache=False)
+        except Exception as e:
+            print(f"  ✗ {ticker}: {e}", file=sys.stderr)
+    if not histories:
+        print("error: no histories fetched", file=sys.stderr)
+        return 2
+    if args.starting_cash:
+        cfg = cfg.model_copy(update={"starting_cash": args.starting_cash})
+    result = run_multi_asset_backtest(cfg, histories)
+    print(result.summary())
+    return 0
+
+
 def _run_paper(args: argparse.Namespace) -> int:
     from .price_fetcher import set_price_source
     settings, strategy = load_all()
@@ -151,7 +180,7 @@ def run() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=("backtest", "optimize", "paper", "live"),
+        choices=("backtest", "optimize", "multi-asset", "paper", "live"),
         default="live",
         help="execution mode (default: live)",
     )
@@ -190,6 +219,8 @@ def run() -> None:
         if not args.ticker:
             parser.error("--mode optimize requires --ticker")
         sys.exit(_run_optimize(args))
+    elif args.mode == "multi-asset":
+        sys.exit(_run_multi_asset(args))
     elif args.mode == "paper":
         sys.exit(_run_paper(args))
     elif args.mode == "live":

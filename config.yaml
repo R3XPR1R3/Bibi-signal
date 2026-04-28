@@ -151,3 +151,21 @@ crypto:
       require_rsi_oversold: true
       rsi_threshold: 35
       sma_long_period: 100
+
+# Multi-asset rotation (Dual Momentum). Bot ranks a basket of ETFs by
+# 90-day momentum and rotates capital to the best one — handles sector
+# rotation automatically. Sits in cash when no asset is above its 200-SMA.
+# Runs via: bash scripts/run.sh multi-asset --years 10
+multi_asset:
+  enabled: false              # backtest works without enabling; flip on for paper/live later
+  universe:
+    - QQQ                     # tech
+    - XLE                     # energy
+    - SCHD                    # dividend
+    - IWM                     # small-caps
+    - GLD                     # gold (defensive)
+  lookback_days: 90           # 3-month return window
+  sma_long_period: 200        # absolute momentum filter
+  rebalance_frequency_days: 7  # weekly rebalance (Mondays)
+  top_n: 1                    # hold the single best asset (raise to 2-3 with bigger capital)
+  starting_cash: 100.0

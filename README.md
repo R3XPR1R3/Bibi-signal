@@ -321,6 +321,62 @@ libraries (`robin-stocks`) exist but violate the ToS and can get your
 account locked. This bot stays on the safe side: it tells you what to do,
 you tap the buttons in the app.
 
+## Multi-asset rotation (Dual Momentum)
+
+A different kind of strategy from the single-asset ladder. Bot manages a
+**basket of ETFs** (QQQ, XLE, SCHD, IWM, GLD by default) and rotates capital
+to whichever has the strongest recent return — but only if that asset is
+above its long SMA. If nothing qualifies, sits in cash.
+
+This handles **sector rotation automatically**. When tech crashes (2022
+QQQ −33%), capital flows into energy (2022 XLE +73%); when both crash,
+defensive cash mode kicks in.
+
+```bash
+bash scripts/run.sh multi-asset --years 10
+```
+
+Configure the universe and parameters in `config.yaml`:
+
+```yaml
+multi_asset:
+  enabled: false              # backtest works without enabling
+  universe:
+    - QQQ                     # tech
+    - XLE                     # energy
+    - SCHD                    # dividend
+    - IWM                     # small-caps
+    - GLD                     # gold (defensive)
+  lookback_days: 90           # 3-month return window
+  sma_long_period: 200        # absolute momentum filter
+  rebalance_frequency_days: 7 # weekly
+  top_n: 1                    # hold the single best (raise to 2-3 with bigger capital)
+```
+
+### Honest expectation
+
+Backtest on the 10-year QQQ/XLE/SCHD/IWM/GLD universe (recent run):
+
+| Strategy | Return | Max drawdown |
+|---|---|---|
+| QQQ buy & hold | +568% | ~33% |
+| Dual Momentum (this) | +346% | ~33% |
+
+Dual Momentum **made money** (+346%) and rotated through every regime
+(34% QQQ, 23% XLE, 23% GLD, 8% cash, etc.) — but **underperformed pure
+QQQ buy & hold** in this specific window because QQQ was the dominant
+asset for most of the decade. The drawdown also wasn't materially
+better, since QQQ's 2022 crash hit while we were partly in QQQ.
+
+Where this strategy actually shines: **multi-decade backtests** that
+include 1973-style stagflation or 2000 dot-com. In those regimes
+single-ticker buy & hold gets crushed and rotation handles it. In our
+10-year window, regime variety just wasn't enough to make rotation pay.
+
+Lesson: **no single strategy beats every era**. Use Dual Momentum if
+you want a robust default that survives any regime; use buy & hold or
+DCA if you're confident in a particular asset's secular trend.
+
 ## Trailing take-profit (let winners run)
 
 Each ticker has two exit modes:

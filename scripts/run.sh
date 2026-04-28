@@ -30,6 +30,10 @@ case "$1" in
         mode="$1"; shift
         exec bibi-signal --mode "$mode" "$@"
         ;;
+    multi-asset|multi)
+        shift
+        exec bibi-signal --mode multi-asset "$@"
+        ;;
     tui)
         exec bibi-tui
         ;;
