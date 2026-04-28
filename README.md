@@ -18,22 +18,82 @@ trade manually in the Robinhood app.
 - Backtests the same strategy on historical data so you can see what it
   would have done before risking real money.
 
-## Install
+## Install (Raspberry Pi or any Debian/Ubuntu)
+
+One-shot setup script — installs system packages, creates a venv, installs
+Python deps, and runs the test suite:
 
 ```bash
 git clone <this-repo>
 cd Bibi-signal
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-
-# Optional: copy .env.example to .env and fill in tokens (only needed for live mode).
-cp .env.example .env
+bash scripts/setup-rpi.sh
 ```
 
-Sanity-check the install:
+After that:
 
 ```bash
-pytest                                        # 29 tests, all should pass
+source .venv/bin/activate
+bibi-tui                # interactive console launcher (recommended on Pi)
+```
+
+Or if you prefer manual install:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env       # only needed for live mode
+```
+
+## Console launcher (`bibi-tui`)
+
+Plain stdlib TUI — no extra deps, ideal for Raspberry Pi. Lets you:
+
+- enter Telegram and Robinhood Crypto API keys without touching `.env` by hand
+- see current LIVE / PAPER cash and which bots are running
+- start/stop modes (paper, live) **in the background** so closing the
+  terminal doesn't kill them
+- run one-shot modes (backtest, optimize) interactively
+- tail logs and check process status
+
+```
+╔══ Bibi-Signal Launcher ═══════════════════════════════╗
+  cwd:     /home/pi/Bibi-signal
+  config:  tickers: QQQ, XLE · interval: 10m · crypto: off · dividends: on
+  cash:    LIVE $100.00   PAPER $1000.00
+  running: ● paper pid 4112 since 14:22
+╚═══════════════════════════════════════════════════════╝
+
+  Main menu
+   [1] Configure       — API keys, strategy YAML
+   [2] Backtest        — historical replay
+   [3] Optimize        — parallel grid search
+   [4] Paper           — virtual money on live prices
+   [5] Live (all-in-1) — Telegram signals + paper mirror + crypto + dividends
+   [6] Status          — running processes
+   [7] Logs            — tail recent
+   [0] Quit
+```
+
+Background processes survive the TUI exit (PID files in `data/run/`,
+logs in `logs/`). Restart the Pi and re-run `bibi-tui` — the launcher
+shows whatever was left running.
+
+## Run as a system service (24/7 on a Pi)
+
+For unattended operation, install the bot as a systemd unit:
+
+```bash
+sudo cp scripts/bibi-signal.service.example /etc/systemd/system/bibi-signal.service
+# Edit User=, WorkingDirectory= for your account
+sudo systemctl daemon-reload
+sudo systemctl enable --now bibi-signal
+journalctl -u bibi-signal -f          # follow logs
+```
+
+## Sanity-check the install
+
+```bash
+pytest                                        # 51 tests, all should pass
 bibi-signal --mode paper --once --no-market-hours   # one tick, prints portfolio
 ```
 

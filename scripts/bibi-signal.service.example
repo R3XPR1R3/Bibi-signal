@@ -1,0 +1,32 @@
+# systemd unit template for running Bibi-Signal on a Raspberry Pi 24/7.
+#
+# To install:
+#   1. Edit User=, Group=, WorkingDirectory= for your account.
+#   2. sudo cp scripts/bibi-signal.service.example /etc/systemd/system/bibi-signal.service
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now bibi-signal
+#   5. journalctl -u bibi-signal -f         # follow logs
+#
+# The unit launches LIVE mode by default (Telegram signals + paper mirror +
+# crypto + dividends). Switch the ExecStart --mode flag to `paper` if you
+# want the Pi to run paper-only.
+
+[Unit]
+Description=Bibi-Signal Ladder Swing Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/Bibi-signal
+EnvironmentFile=/home/pi/Bibi-signal/.env
+ExecStart=/home/pi/Bibi-signal/.venv/bin/bibi-signal --mode live
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/pi/Bibi-signal/logs/systemd.log
+StandardError=append:/home/pi/Bibi-signal/logs/systemd.log
+
+[Install]
+WantedBy=multi-user.target

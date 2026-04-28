@@ -39,6 +39,7 @@ dev = [
 [project.scripts]
 bibi-signal = "bibi_signal.main:run"
 bibi-backtest = "bibi_signal.backtest:cli"
+bibi-tui = "bibi_signal.tui:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
