@@ -167,7 +167,47 @@ how it compares to buy-and-hold.
 ```bash
 bibi-signal --mode backtest --ticker QQQ --years 5
 bibi-signal --mode backtest --ticker XLE --years 5 --starting-cash 100
+
+# Intraday backtest — for micro-strategies that work on hourly/5-min movements:
+bibi-signal --mode backtest --ticker QQQ --years 2 --interval 1h
+bibi-signal --mode backtest --ticker QQQ --years 0.16 --interval 5m   # ~60 days
 ```
+
+`--interval` defaults to `1d` (daily bars). yfinance's intraday history
+is limited: `5m` only goes back ~60 days, `1h` ~730 days. Daily bars
+hide intraday movements (a 2% intraday dip-and-bounce shows as one bar
+with H-L=2%), so for any strategy targeting <1% movements, **use
+`--interval 1h`** to see realistic results.
+
+#### Micro-strategy params
+
+If your `profit_percent` is much larger than the asset's typical weekly
+move (e.g., 4% on QQQ which moves ~1-2%/week), the bot will rarely close
+a lot. Tune for actual volatility:
+
+```yaml
+QQQ:
+  dip_percent: 0.005          # 0.5%
+  profit_percent: 0.012       # 1.2%
+  stop_loss_percent: 0.04     # 4%
+  trailing_take_profit: true
+  trail_percent: 0.005
+  max_open_lots: 10
+  require_rsi_oversold: false # filters block too much on small moves
+  require_uptrend: false
+```
+
+Real comparison on 2y hourly QQQ:
+
+| Params | Trades | Realised P&L | Drawdown |
+|---|---|---|---|
+| Default (2%/4%) | 19 | $8.56 | 2.8% |
+| Micro (0.5%/1.2%) | 465 | $6.53 + $16 unrealised | 5.5% |
+
+Both end roughly the same total equity, but micro generates 24× more
+trade activity — useful for learning patterns and verifying signal
+quality. Both still trail buy-and-hold in this 2y window because QQQ
+was in a strong rally.
 
 ### 2. Paper — live prices, virtual money (no Telegram needed)
 

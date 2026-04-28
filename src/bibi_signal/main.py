@@ -50,14 +50,36 @@ def _run_backtest(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     starting = args.starting_cash if args.starting_cash else strategy.starting_cash
+    # yfinance period must match interval — adjust for intraday
+    if args.interval != "1d":
+        period = _intraday_period(args.years, args.interval)
+    else:
+        period = f"{args.years}y"
+    print(f"[backtest] {args.ticker}  period={period}  interval={args.interval}")
     result = run_backtest(
         args.ticker,
         strategy.tickers[args.ticker],
         starting,
-        period=f"{args.years}y",
+        period=period,
+        interval=args.interval,
     )
     print(result.summary())
     return 0
+
+
+def _intraday_period(years: float, interval: str) -> str:
+    """yfinance caps intraday history. 5m → 60 days max, 1h → 730 days max.
+
+    We translate the user's --years into a yfinance period string that
+    actually returns data, capped per interval limit.
+    """
+    days_requested = int(years * 365)
+    cap = {
+        "1m": 7, "2m": 60, "5m": 60, "15m": 60, "30m": 60, "60m": 730,
+        "90m": 60, "1h": 730,
+    }.get(interval, 60)
+    days = min(days_requested, cap)
+    return f"{days}d"
 
 
 def _run_optimize(args: argparse.Namespace) -> int:
@@ -76,7 +98,7 @@ def _run_optimize(args: argparse.Namespace) -> int:
         args.ticker,
         strategy.tickers[args.ticker],
         starting,
-        period=f"{args.years}y",
+        period=f"{int(args.years)}y",
         workers=args.workers,
         top_k=max(args.top, 30),
         train_frac=args.train_frac,
@@ -97,7 +119,7 @@ def _run_multi_asset(args: argparse.Namespace) -> int:
     if not cfg.universe:
         print("error: multi_asset.universe is empty in config.yaml", file=sys.stderr)
         return 2
-    period = f"{args.years}y"
+    period = f"{int(args.years)}y"
     print(f"[multi-asset] downloading {len(cfg.universe)} tickers for {period}…")
     histories: dict = {}
     for ticker in cfg.universe:
@@ -188,9 +210,14 @@ def run() -> None:
 
     # backtest-only
     parser.add_argument("--ticker", help="[backtest] ticker symbol")
-    parser.add_argument("--years", type=int, default=5, help="[backtest] history window in years")
+    parser.add_argument("--years", type=float, default=5,
+                        help="[backtest] history window in years (e.g., 0.16 for 60 days)")
     parser.add_argument("--starting-cash", type=float, default=None,
                         help="[backtest/optimize] override starting capital")
+    parser.add_argument("--interval", default="1d",
+                        choices=("1d", "1h", "30m", "15m", "5m", "1m"),
+                        help="[backtest] bar interval. Intraday limits: "
+                             "5m≤60d, 1h≤730d. Default: 1d")
 
     # optimize-only
     parser.add_argument("--workers", type=int, default=None,

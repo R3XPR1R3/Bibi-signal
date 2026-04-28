@@ -122,6 +122,11 @@ def run_backtest(
     period: str = "5y",
     interval: str = "1d",
 ) -> BTResult:
+    """Replay strategy on `period` of bars at `interval` granularity.
+
+    interval can be "1d", "1h", "30m", "15m", "5m". Note that yfinance
+    limits intraday history: 5m only goes back ~60 days, 1h ~730 days.
+    """
     df = get_history(ticker, period=period, interval=interval, use_cache=False)
     return run_backtest_on_df(ticker, cfg, starting_cash, df)
 
